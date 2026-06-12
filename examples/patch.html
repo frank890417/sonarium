@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Patcher — design a sound system, share it · Sonarium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#07080f; --ink:#e9ebf7; --mut:#9aa3bf; --line:rgba(255,255,255,.14); --accent:#1de3c0; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Space Grotesk", system-ui, sans-serif; padding: 24px clamp(14px,4vw,56px) 90px; }
+  a { color: var(--accent); }
+  h1 { font-size: clamp(26px, 5vw, 40px); margin: 8px 0 4px; }
+  p.lead { color: var(--mut); max-width: 720px; margin-bottom: 22px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; max-width: 1100px; }
+  .panel { border: 1px solid var(--line); border-radius: 16px; padding: 16px; background: rgba(255,255,255,.04); }
+  .panel h2 { font-size: 14px; letter-spacing: .05em; color: var(--accent); margin-bottom: 10px; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; color: var(--mut); margin: 8px 0; }
+  select, input[type=number] { font: inherit; font-size: 13px; color: var(--ink); background: rgba(255,255,255,.07); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+  input[type=range] { width: 130px; accent-color: var(--accent); }
+  .apply-bar { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
+  .apply-bar button { font: inherit; color: var(--ink); cursor: pointer; border: 1px solid var(--line); border-radius: 999px; background: rgba(29,227,192,.1); padding: 10px 22px; }
+  .apply-bar button:hover { border-color: var(--accent); }
+  textarea { width: 100%; min-height: 110px; font: 12px ui-monospace, Menlo, monospace; color: var(--ink); background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .tryout { margin-top: 24px; }
+  .tryout h2 { font-size: 16px; color: var(--mut); font-weight: 500; margin-bottom: 12px; }
+  .tryout .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .tryout button { font: inherit; color: var(--ink); cursor: pointer; border: 1px solid var(--line); background: radial-gradient(circle at 30% 30%, rgba(124,212,253,.35), rgba(157,140,255,.1)); }
+  .tryout h3 { width: 100%; font-size: 14px; color: var(--mut); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<a href="./index.html">← Sonarium</a>
+<h1>The Patcher</h1>
+<p class="lead">The 2020 thesis built a visual patcher so anyone could design a sound system. Here it returns:
+edit this page's <b>patch</b> — voices per role, the Spat perceptual operator, key and tempo — then
+<b>export it as JSON</b> and load it anywhere Sonarium runs. A patch is just data; sharing one is sharing an instrument.</p>
+
+<div class="grid" data-sonic="off">
+  <div class="panel">
+    <h2>VOICES (per role)</h2>
+    <div id="roles"></div>
+  </div>
+  <div class="panel">
+    <h2>PERCEPTUAL OPERATOR</h2>
+    <div id="factors"></div>
+    <label>key
+      <select id="p-key">
+        <option value="auto" selected>auto (palette + hostname)</option>
+      </select>
+    </label>
+    <label>tempo (bpm, 0 = auto) <input type="number" id="p-tempo" min="0" max="200" value="0" style="width:80px"></label>
+    <label>ambience <input type="range" id="p-ambient" min="0" max="100" value="12"></label>
+  </div>
+  <div class="panel">
+    <h2>PATCH JSON (export / import)</h2>
+    <textarea id="json" spellcheck="false"></textarea>
+    <div class="apply-bar" style="margin:10px 0 0">
+      <button id="copy">copy</button>
+      <button id="download">⇩ download</button>
+      <button id="load">⇪ apply JSON</button>
+    </div>
+  </div>
+</div>
+
+<div class="apply-bar" data-sonic="off">
+  <button id="apply">⟲ apply patch</button>
+  <span style="color:var(--mut);font-size:13px;align-self:center" id="status">default aurora patch</span>
+</div>
+
+<div class="tryout">
+  <h2>try the patch — these elements speak it</h2>
+  <div class="row">
+    <h3>a heading scale:</h3>
+    <button style="width:54px;height:54px;border-radius:0">▪</button>
+    <button style="width:84px;height:84px;border-radius:16px">◆</button>
+    <button style="width:120px;height:120px;border-radius:50%">●</button>
+    <button style="width:220px;height:64px;border-radius:999px">drag me — ribbon</button>
+    <button style="width:96px;height:96px;border-radius:8px;border-width:5px;border-style:solid">folded</button>
+    <button style="width:96px;height:96px;border-radius:24px;border-style:dashed;border-width:3px">chopped</button>
+  </div>
+</div>
+
+<script src="../dist/sonarium.iife.js"></script>
+<script>
+  const debug = (window.__sonariumDebug = { started: false, triggers: [], errors: [] });
+  window.addEventListener('error', (e) => debug.errors.push(String(e.message)));
+
+  const ROLES = ['button', 'link', 'heading', 'item', 'input', 'text', 'toggle', 'media'];
+  const KINDS = ['matter', 'synth', 'fm', 'pluck', 'membrane', 'noise'];
+  const FACTORS = ['presence', 'roomPresence', 'envelopment', 'warmth', 'brilliance'];
+  const NOTES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+
+  // ------- build controls
+  const rolesEl = document.getElementById('roles');
+  for (const role of ROLES) {
+    rolesEl.insertAdjacentHTML('beforeend', `
+      <label>${role}
+        <span>
+          <select data-role-kind="${role}">${KINDS.map(k => `<option ${k === defaultKind(role) ? 'selected' : ''}>${k}</option>`).join('')}</select>
+          <input type="range" data-role-vel="${role}" min="0" max="120" value="${Math.round(defaultVel(role) * 100)}" title="velocity">
+        </span>
+      </label>`);
+  }
+  function defaultKind(role) { return Sonarium.THEMES.aurora.roles[role]?.synthKind ?? 'matter'; }
+  function defaultVel(role) { return Sonarium.THEMES.aurora.roles[role]?.baseVelocity ?? 0.8; }
+
+  const factorsEl = document.getElementById('factors');
+  for (const f of FACTORS) {
+    factorsEl.insertAdjacentHTML('beforeend',
+      `<label>${f} <input type="range" data-factor="${f}" min="0" max="100" value="${Math.round(Sonarium.DEFAULT_FACTORS[f] * 100)}"></label>`);
+  }
+  const keySel = document.getElementById('p-key');
+  for (const scale of Object.keys(Sonarium.SCALES))
+    for (const n of NOTES) keySel.insertAdjacentHTML('beforeend', `<option>${n} ${scale}</option>`);
+
+  // ------- patch <-> UI
+  function patchFromUi() {
+    const theme = { name: 'custom', defaults: { ...Sonarium.THEMES.aurora.defaults }, roles: {} };
+    for (const role of ROLES) {
+      theme.roles[role] = {
+        ...(Sonarium.THEMES.aurora.roles[role] ?? {}),
+        synthKind: document.querySelector(`[data-role-kind="${role}"]`).value,
+        baseVelocity: Number(document.querySelector(`[data-role-vel="${role}"]`).value) / 100,
+      };
+    }
+    const perceptual = {};
+    for (const f of FACTORS) perceptual[f] = Number(document.querySelector(`[data-factor="${f}"]`).value) / 100;
+    return {
+      sonariumPatch: 1,
+      theme,
+      perceptual,
+      key: keySel.value,
+      tempo: Number(document.getElementById('p-tempo').value) || 0,
+      ambient: Number(document.getElementById('p-ambient').value) / 100,
+    };
+  }
+  function uiFromPatch(p) {
+    for (const role of ROLES) {
+      const r = p.theme?.roles?.[role];
+      if (!r) continue;
+      if (r.synthKind) document.querySelector(`[data-role-kind="${role}"]`).value = r.synthKind;
+      if (r.baseVelocity !== undefined) document.querySelector(`[data-role-vel="${role}"]`).value = Math.round(r.baseVelocity * 100);
+    }
+    for (const f of FACTORS) if (p.perceptual?.[f] !== undefined)
+      document.querySelector(`[data-factor="${f}"]`).value = Math.round(p.perceptual[f] * 100);
+    if (p.key) keySel.value = p.key;
+    if (p.tempo !== undefined) document.getElementById('p-tempo').value = p.tempo;
+    if (p.ambient !== undefined) document.getElementById('p-ambient').value = Math.round(p.ambient * 100);
+  }
+
+  // ------- engine lifecycle
+  let space;
+  function applyPatch() {
+    const p = patchFromUi();
+    document.documentElement.style.setProperty('--sonic-tempo', p.tempo > 0 ? String(p.tempo) : '');
+    if (space) space.dispose();
+    space = window.space = Sonarium.create({
+      theme: p.theme,
+      perceptual: p.perceptual,
+      key: p.key,
+      ambient: p.ambient,
+    });
+    space.on('start', () => { debug.started = true; });
+    space.on('trigger', (d) => { debug.triggers.push(d.articulation); if (debug.triggers.length > 200) debug.triggers.shift(); });
+    space.start();
+    document.getElementById('json').value = JSON.stringify(p, null, 2);
+    document.getElementById('status').textContent =
+      `patch applied — ${space.opts.key.label}${p.tempo ? ` · ${p.tempo} bpm` : ''}`;
+  }
+
+  document.getElementById('apply').addEventListener('click', applyPatch);
+  document.getElementById('copy').addEventListener('click', () => navigator.clipboard?.writeText(document.getElementById('json').value));
+  document.getElementById('download').addEventListener('click', () => {
+    const blob = new Blob([document.getElementById('json').value], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'sonarium-patch.json';
+    a.click();
+  });
+  document.getElementById('load').addEventListener('click', () => {
+    try {
+      uiFromPatch(JSON.parse(document.getElementById('json').value));
+      applyPatch();
+    } catch (e) {
+      document.getElementById('status').textContent = 'invalid JSON: ' + e.message;
+    }
+  });
+
+  // boot with defaults (armed; first click unlocks)
+  space = window.space = Sonarium.create({});
+  space.on('start', () => { debug.started = true; });
+  space.on('trigger', (d) => debug.triggers.push(d.articulation));
+  document.getElementById('json').value = JSON.stringify(patchFromUi(), null, 2);
+</script>
+</body>
+</html>

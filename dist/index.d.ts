@@ -267,6 +267,8 @@ interface SonariumOptions {
     reverb?: 'auto' | number;
     /** Respect prefers-reduced-motion by softening output. Default true. */
     respectReducedMotion?: boolean;
+    /** Mirror every trigger to the first Web MIDI output (the page as a MIDI controller). Default false. */
+    midi?: boolean;
 }
 type SonariumEvent = 'start' | 'trigger' | 'mute' | 'dispose';
 interface TriggerDetail {
@@ -513,6 +515,7 @@ interface ResolvedOptions {
     spatial: 'ambisonic' | 'panner';
     reverb: 'auto' | number;
     velocityFactor: number;
+    midi: boolean;
 }
 type State = 'idle' | 'armed' | 'running' | 'disposed';
 declare class Engine {
@@ -570,8 +573,8 @@ declare class Engine {
      * consonant intervals only (e.g. keyboard.ts FILL_INTERVALS).
      */
     excite(el: Element, velocity: number, articulation: Articulation, when?: number, transpose?: number): void;
-    /** I3/I11 — strum a set of elements left→right. */
-    strum(els: Element[], velocity: number, articulation?: Articulation): void;
+    /** I3/I11 — strum a set of elements left→right (or right→left for a reverse flick). */
+    strum(els: Element[], velocity: number, articulation?: Articulation, reverse?: boolean): void;
     private whisper;
     /** I12 — the page introduces itself: its largest landmarks, in DOM order, in the site key. */
     private playIntroMotif;
@@ -986,7 +989,7 @@ declare namespace sphere {
  * Docs: https://github.com/frank890417/sonarium — start with docs/PLAN.md.
  */
 
-declare const version = "0.5.0";
+declare const version = "0.6.0";
 
 /**
  * Create a Sonarium instance. Safe to call before any user gesture: audio arms itself and

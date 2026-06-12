@@ -24,9 +24,16 @@ export function attachMotion(engine: Engine): () => void {
     if (!a || a.x == null || a.y == null || a.z == null) return
     const magnitude = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.81)
     const now = performance.now()
-    if (magnitude > SHAKE_THRESHOLD && now - lastShake > SHAKE_REFRACTORY_MS) {
+    if (now - lastShake <= SHAKE_REFRACTORY_MS) return
+    if (magnitude > SHAKE_THRESHOLD) {
       lastShake = now
       engine.strum(engine.scanner.visibleElements(), 0.5)
+      return
+    }
+    // Directional flick (v0.6 gesture grammar): a horizontal jab strums in its direction.
+    if (Math.abs(a.x) > 12 && Math.abs(a.x) > 2 * Math.abs(a.y)) {
+      lastShake = now
+      engine.strum(engine.scanner.visibleElements(), 0.4, 'strum', a.x > 0)
     }
   }
 

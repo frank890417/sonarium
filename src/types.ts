@@ -143,6 +143,8 @@ export interface SonariumOptions {
   reverb?: 'auto' | number
   /** Respect prefers-reduced-motion by softening output. Default true. */
   respectReducedMotion?: boolean
+  /** Mirror every trigger to the first Web MIDI output (the page as a MIDI controller). Default false. */
+  midi?: boolean
 }
 
 export type SonariumEvent = 'start' | 'trigger' | 'mute' | 'dispose'

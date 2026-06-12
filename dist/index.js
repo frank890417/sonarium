@@ -2193,9 +2193,15 @@ function attachMotion(engine) {
     if (!a || a.x == null || a.y == null || a.z == null) return;
     const magnitude = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.81);
     const now7 = performance.now();
-    if (magnitude > SHAKE_THRESHOLD && now7 - lastShake > SHAKE_REFRACTORY_MS) {
+    if (now7 - lastShake <= SHAKE_REFRACTORY_MS) return;
+    if (magnitude > SHAKE_THRESHOLD) {
       lastShake = now7;
       engine.strum(engine.scanner.visibleElements(), 0.5);
+      return;
+    }
+    if (Math.abs(a.x) > 12 && Math.abs(a.x) > 2 * Math.abs(a.y)) {
+      lastShake = now7;
+      engine.strum(engine.scanner.visibleElements(), 0.4, "strum", a.x > 0);
     }
   };
   const listen = () => {
@@ -2262,6 +2268,49 @@ function attachDrag(engine) {
   };
 }
 
+// src/interact/midi.ts
+var ROLE_CHANNEL = {
+  button: 0,
+  link: 1,
+  toggle: 2,
+  input: 3,
+  heading: 4,
+  media: 5,
+  item: 6,
+  text: 7,
+  container: 8
+};
+function attachMidi(engine) {
+  const nav = navigator;
+  if (typeof nav.requestMIDIAccess !== "function") return () => {
+  };
+  let out = null;
+  let off = null;
+  nav.requestMIDIAccess().then((access) => {
+    const a = access;
+    out = a.outputs.values().next().value ?? null;
+    if (!out) return;
+    off = engine.on("trigger", (detail) => {
+      const d = detail;
+      const note = Math.max(0, Math.min(127, Math.round(d.profile.midi)));
+      const vel = Math.max(1, Math.min(127, Math.round(d.velocity * d.profile.velocityScale * 127)));
+      const ch = ROLE_CHANNEL[d.profile.role] ?? 9;
+      try {
+        out.send([144 | ch, note, vel]);
+        setTimeout(() => {
+          try {
+            out?.send([128 | ch, note, 0]);
+          } catch {
+          }
+        }, Math.min(4e3, d.profile.durationS * 1e3 + 60));
+      } catch {
+      }
+    });
+  }).catch(() => {
+  });
+  return () => off?.();
+}
+
 // src/core/engine.ts
 var Engine = class {
   constructor(userOpts = {}) {
@@ -2310,7 +2359,8 @@ var Engine = class {
       panning: userOpts.panning === "equalpower" ? "equalpower" : "HRTF",
       spatial: userOpts.spatial === "panner" ? "panner" : "ambisonic",
       reverb: userOpts.reverb ?? "auto",
-      velocityFactor: reduced ? 0.7 : 1
+      velocityFactor: reduced ? 0.7 : 1,
+      midi: userOpts.midi === true
     };
     this.factors = resolveFactors(userOpts.perceptual);
     this.env = {
@@ -2374,6 +2424,7 @@ var Engine = class {
       attachDrag(this)
     );
     if (this.opts.motion) this.detachers.push(attachMotion(this));
+    if (this.opts.midi) this.detachers.push(attachMidi(this));
     const onVis = () => this.room?.setHidden(document.hidden);
     document.addEventListener("visibilitychange", onVis);
     this.detachers.push(() => document.removeEventListener("visibilitychange", onVis));
@@ -2543,10 +2594,10 @@ var Engine = class {
     }
     this.emit("trigger", { el: target, profile, velocity, articulation });
   }
-  /** I3/I11 — strum a set of elements left→right. */
-  strum(els, velocity, articulation = "strum") {
+  /** I3/I11 — strum a set of elements left→right (or right→left for a reverse flick). */
+  strum(els, velocity, articulation = "strum", reverse = false) {
     if (this.state !== "running" || !this.pool) return;
-    const sorted = els.map((el) => ({ el, p: this.scanner.profileFor(el) })).filter((x) => !!x.p).sort((a, b) => a.p.rect.x - b.p.rect.x).slice(0, 6);
+    const sorted = els.map((el) => ({ el, p: this.scanner.profileFor(el) })).filter((x) => !!x.p).sort((a, b) => reverse ? b.p.rect.x - a.p.rect.x : a.p.rect.x - b.p.rect.x).slice(0, 6);
     const t0 = Tone9.now();
     const step = strumStepS(this.tempo);
     sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * step));
@@ -2604,7 +2655,7 @@ var Engine = class {
 };
 
 // src/index.ts
-var version = "0.5.0";
+var version = "0.6.0";
 function create(options = {}) {
   return new Engine(options);
 }

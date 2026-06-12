@@ -21,6 +21,16 @@ That's the whole integration. The page now *hears itself*:
   *sounds* from the left, decoded binaurally through virtual speakers. Moving the mouse doesn't
   move a listener point: it **rotates the entire field**, like turning your head.
   Spec: [docs/SPATIAL.md](./docs/SPATIAL.md) · live: [the Sound Sphere 聲球 demo](https://frank890417.github.io/sonarium/examples/sphere.html).
+- **The page is the patch (v0.5).** Modular-synth depth, cabled from CSS: heavy borders drive a
+  **wavefolder**, rough sharp surfaces ring with **audio-rate FM**, massive elements thicken with
+  **unison**, a CSS-animated element **audibly pulses at its own animation rate**, dashed borders
+  **chop** (the S&H of CSS), transitions become portamento, bold type carries weight. Press and
+  **drag any control** and it becomes a ribbon controller sweeping the page's scale. Idle voices
+  sleep (silent pages idle at ~zero CPU). Spec: [docs/MODULAR.md](./docs/MODULAR.md).
+- **It's an instrument bench too (v0.6).** [The Patcher](https://frank890417.github.io/sonarium/examples/patch.html)
+  edits a page's whole sound system and exports it as a JSON patch; [the Lab](https://frank890417.github.io/sonarium/examples/lab.html)
+  runs the thesis mismatch experiment on your own ears; `midi: true` mirrors every trigger to
+  Web MIDI (record your browsing into a DAW).
 - **Geometry is a material, not a setting (v0.3).** Visual properties condense into four
   macro-dimensions — **edge, mass, texture, air** — and each one moves *bundles* of co-varying
   cues, so the ear hears one coherent object: a sharp button literally **clicks** (a /k/ noise
@@ -199,12 +209,13 @@ air-rush; every weave carries a blindfold-test acceptance criterion.
 **v0.4 "Alive 活" — shipped**: the Chroma weave + the Pulse ([CHROMA.md](./docs/CHROMA.md) /
 [PULSE.md](./docs/PULSE.md)) — color as mood, palette as mode, layout tempo, metered echoes,
 phrase engine, the aural stylesheet, the calm system.
-**v0.5 "Instrumented"** — npm publish, `/lab` (the thesis mismatch experiment online, validating
-every weave with real listeners), performance pass, typography research, drag glissandi.
-**v0.6 "Embodied"** — gesture grammar, Web MIDI, WebXR listener, multi-user rooms (hear other
-cursors). **v0.7 "Ecosystem"** — visual theme editor + shareable/remixable theme registry.
-**v1.0 "Standard"** — stability, formal a11y audit, and a community spec for `--sonic-*`.
-Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
+**v0.5 "Modular 模組" — shipped**: the modular patch ([MODULAR.md](./docs/MODULAR.md)) —
+wavefolder, FM, unison, CSS-cabled LFOs, ribbon glissando, voice sleeping, ghost-trigger fixes.
+**v0.6 "Instrumented" — shipped**: the Lab (mismatch experiment), the Patcher (JSON patches),
+Web MIDI out, flick gestures, npm-ready packaging.
+**Gated** (waiting on the world, fully specified in [PLAN.md](./docs/PLAN.md) §P6): npm publish
+(one `npm login` away), WebXR head tracking, multi-user rooms, HOA + measured HRIRs, the formal
+a11y study, `--sonic-*` standardization.
 
 ## 繁體中文簡介
 
@@ -216,6 +227,12 @@ Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
   回聲（主要聲音永不延遲 — 手感優先）；開啟環境音時，頁面會以閱讀順序輕聲**演奏自己的版面**，捲動
   就是移動樂譜的播放頭。重複的聲音會禮貌地退讓再恢復（calm 系統）。設計師可以直接在 CSS 裡寫聲音：
   `--sonic-*` 自訂屬性會沿著樹繼承。規格：[CHROMA.md](./docs/CHROMA.md)、[PULSE.md](./docs/PULSE.md)。
+- **整個頁面就是一張 patch**（v0.5–v0.6）：模組合成器的深度，由 CSS 接線 — 粗邊框推動波形摺疊器、
+  粗糙銳利的表面有 FM 金屬鳴響、巨大元素有 unison 厚度；**有 CSS 動畫的元素會用自己的動畫速率震動**、
+  虛線邊框產生方波斷奏、transition 變成滑音、粗體字有重量。按住任何控制項**拖曳就是 ribbon 滑奏**
+  （沿著頁面音階量化）。閒置聲部會睡眠（安靜頁面 CPU 趨近零）。再加上 [Patcher](https://frank890417.github.io/sonarium/examples/patch.html)
+  （編輯整頁聲音系統、匯出 JSON patch — 2020 碩論 patcher 還魂）、[Lab](https://frank890417.github.io/sonarium/examples/lab.html)
+  （錯配實驗線上版）、Web MIDI 輸出（把瀏覽行為錄進 DAW）。規格：[MODULAR.md](./docs/MODULAR.md)。
 - **幾何是材質，不是參數**（v0.3）：視覺屬性凝聚成四個宏觀維度 — **銳（edge）、質（mass）、
   紋（texture）、距（air）** — 每個維度同時牽動一整束同步變化的聲音線索（Bregman 聽覺場景分析：
   同步共變的線索會融合成「一個物體」）。尖銳的按鈕真的會「喀」一聲（/k/ 噪聲爆發）、亮且乾；

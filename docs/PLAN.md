@@ -231,29 +231,50 @@ Color becomes mood, time becomes pulse — see [CHROMA.md](./CHROMA.md) + [PULSE
   `--sonic-key`/`--sonic-tempo` at root) — the standardization seed.
 - **Calm system**: per-element velocity ducking with decay (RQ3 answered in code).
 
-### P4 — v0.5 "Instrumented" (next 1–2 sessions)
-- npm publish (`sonarium`), versioned CDN docs, CHANGELOG discipline.
-- Listening-test page (`/lab`): the thesis mismatch experiment, online, collecting anonymous
-  agreement scores for every mapping and weave (data → canon revisions).
-- Performance pass: voice sleeping (stop idle sources after timeout), Playwright smoke +
-  OfflineAudioContext render assertions, low-end mobile profile.
-- Typography mapping research (font-size/weight → register/velocity; serif/sans → RQ5).
-- Drag → continuous glissando voice (theremin model).
+### P4 — v0.5 "Modular 模組" *(user-directed, 2026-06: shipped this session)*
+The page becomes the patch — see [MODULAR.md](./MODULAR.md): wavefolder (border-width × EDGE),
+audio-rate FM (texture × edge), unison thickness (MASS), LFOs patched from CSS animation and
+dashed borders, transition→portamento, typography→MASS (M7), the drag **ribbon controller**
+(scale-quantized glissando), **voice sleeping** (idle lanes power down), and the ghost-trigger
+fixes (scroll-hover suppression, Tab-only focus previews, resolution hop cap).
 
-### P5 — v0.6 "Embodied"
+### P5 — v0.6 "Instrumented" *(shipped this session)*
+- **/lab** ([examples/lab.html](../examples/lab.html)): the thesis mismatch experiment online —
+  2AFC roundness trials, agreement score vs the RQ1 70% criterion, localStorage + JSON export.
+- **Web MIDI out** (`midi: true`): every trigger mirrors to the first MIDI output, channel per
+  role — the page as a MIDI controller; record your browsing into a DAW.
+- **The Patcher** ([examples/patch.html](../examples/patch.html)): the 2020 thesis patcher
+  reborn — edit voices/operator/key/tempo, export/import the patch as JSON (a patch is data;
+  sharing one is sharing an instrument). This is the seed of the theme registry.
+- Flick gesture grammar (directional strums) on mobile; npm publish readiness
+  (`prepublishOnly`, `publishConfig`).
+
+### P6 — Gated (real, specified, and waiting on something Sonarium can't conjure)
+
+| Item | Needs | Ready hook |
+|---|---|---|
+| npm publish | 哲宇's npm login (`npm login && npm publish`) | package.json fully prepared |
+| /lab shared dataset | a data endpoint (any POST sink) | lab already exports JSON |
+| WebXR / head-tracked listener | XR device session | `rig.lookAt(yaw, pitch)` is the exact plug |
+| Multi-user rooms (hear other cursors) | a WebRTC/WS signalling server | excite()/sphere protocol sketch in SPATIAL.md §7 |
+| HOA orders 2–3 + measured-HRIR worklet | SH rotation recurrence + SADIE assets | sh.ts/bus channel count isolated |
+| Formal a11y audit (RQ2 with users) | human participants, SR users | describe()/quantizer designed for it |
+| `--sonic-*` standardization | community adoption | spec lives in CHROMA.md §4 |
+
+### P7 — "Embodied+" (absorbed: flick shipped in v0.6; the rest sits in the Gated table)
 - Gesture grammar: flick/circle/shake-direction vocabulary on mobile; gamepad; Web MIDI in/out.
 - WebXR listener (page becomes a literal room in AR/VR); head-tracked HRTF where available.
 - Multi-user shared rooms (WebRTC data channels): hear other cursors as positioned voices —
   the thesis V7 multiplayer thread.
 - React/Vue/Svelte bindings (`<Sonarium>` provider; hooks for custom triggers).
 
-### P6 — v0.7 "Ecosystem"
+### P8 — "Ecosystem" (the Patcher shipped the seed; registry/marketplace sits in Gated)
 - Theme editor (visual mapper: drag curves between CSS properties and synth params — the thesis
   patcher, reborn); theme share/remix registry (JSON packs + gallery).
 - Site-author API for narrative scoring (sections as movements, scroll as timeline).
 - Performance: AudioWorklet ambience, shared HRTF panner pool benchmark.
 
-### P7 — v1.0 "Standard"
+### P9 — v1.0 "Standard"
 - Stability guarantees, full a11y audit with screen-reader users, i18n docs,
   spec write-up proposing `--sonic-*` conventions as a community standard, academic paper
   (CHI/NIME/ICAD) reporting RQ1–RQ5 results.

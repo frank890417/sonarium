@@ -32,6 +32,7 @@ import { attachKeyboard } from '../interact/keyboard'
 import { attachScroll } from '../interact/scroll'
 import { attachMotion } from '../interact/motion'
 import { attachDrag } from '../interact/drag'
+import { attachMidi } from '../interact/midi'
 
 interface ResolvedOptions {
   root: Element
@@ -47,6 +48,7 @@ interface ResolvedOptions {
   spatial: 'ambisonic' | 'panner'
   reverb: 'auto' | number
   velocityFactor: number
+  midi: boolean
 }
 
 type State = 'idle' | 'armed' | 'running' | 'disposed'
@@ -116,6 +118,7 @@ export class Engine {
       spatial: userOpts.spatial === 'panner' ? 'panner' : 'ambisonic',
       reverb: userOpts.reverb ?? 'auto',
       velocityFactor: reduced ? 0.7 : 1,
+      midi: userOpts.midi === true,
     }
     this.factors = resolveFactors(userOpts.perceptual)
 
@@ -200,6 +203,7 @@ export class Engine {
       attachDrag(this),
     )
     if (this.opts.motion) this.detachers.push(attachMotion(this))
+    if (this.opts.midi) this.detachers.push(attachMidi(this))
 
     const onVis = () => this.room?.setHidden(document.hidden)
     document.addEventListener('visibilitychange', onVis)
@@ -389,13 +393,13 @@ export class Engine {
     this.emit('trigger', { el: target, profile, velocity, articulation } satisfies TriggerDetail)
   }
 
-  /** I3/I11 — strum a set of elements left→right. */
-  strum(els: Element[], velocity: number, articulation: Articulation = 'strum'): void {
+  /** I3/I11 — strum a set of elements left→right (or right→left for a reverse flick). */
+  strum(els: Element[], velocity: number, articulation: Articulation = 'strum', reverse = false): void {
     if (this.state !== 'running' || !this.pool) return
     const sorted = els
       .map((el) => ({ el, p: this.scanner.profileFor(el) }))
       .filter((x): x is { el: Element; p: SonicProfile } => !!x.p)
-      .sort((a, b) => a.p.rect.x - b.p.rect.x)
+      .sort((a, b) => (reverse ? b.p.rect.x - a.p.rect.x : a.p.rect.x - b.p.rect.x))
       .slice(0, 6)
     // metered: 32nd-note spacing at the page's tempo (PULSE.md §3)
     const t0 = Tone.now()

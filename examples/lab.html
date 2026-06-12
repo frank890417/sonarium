@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>/lab — does the mapping hold? · Sonarium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#07080f; --ink:#e9ebf7; --mut:#9aa3bf; --line:rgba(255,255,255,.14); --accent:#1de3c0; --bad:#ff5470; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Space Grotesk", system-ui, sans-serif; padding: 24px clamp(14px, 5vw, 60px) 80px; }
+  a { color: var(--accent); }
+  h1 { font-size: clamp(26px, 5vw, 40px); margin: 8px 0 6px; }
+  p.lead { color: var(--mut); max-width: 660px; margin-bottom: 24px; }
+  .stage { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px, 380px); gap: 26px; align-items: start; max-width: 980px; }
+  @media (max-width: 800px) { .stage { grid-template-columns: 1fr; } }
+  #arena { position: relative; height: 360px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.03); display: grid; place-items: center; }
+  #question { border: 1px solid rgba(255,255,255,.3); background: radial-gradient(circle at 32% 28%, rgba(124,212,253,.55), rgba(157,140,255,.15)); cursor: pointer; }
+  #foil { position: absolute; visibility: hidden; border: 0; }
+  .panel { border: 1px solid var(--line); border-radius: 16px; padding: 18px; background: rgba(255,255,255,.04); }
+  .panel h2 { font-size: 15px; letter-spacing: .04em; margin-bottom: 10px; }
+  .row { display: flex; gap: 10px; margin: 10px 0; }
+  button { font: inherit; color: var(--ink); cursor: pointer; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.06); padding: 12px 0; flex: 1; font-size: 15px; }
+  button:hover { border-color: var(--accent); }
+  button.pick { background: rgba(29,227,192,.12); }
+  #verdict { min-height: 26px; font-size: 14px; margin-top: 4px; }
+  #verdict.good { color: var(--accent); } #verdict.bad { color: var(--bad); }
+  .score { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--mut); margin-top: 14px; line-height: 1.8; }
+  .score b { color: var(--ink); }
+  .small { font-size: 12.5px; color: var(--mut); margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<a href="./index.html">← Sonarium</a>
+<h1>The Lab — RQ1, live</h1>
+<p class="lead">The thesis mismatch experiment, online (PLAN.md §8). A shape appears; two sounds play.
+One is the shape's true Sonarium voice, the other belongs to its <i>opposite</i> (roundness inverted).
+<b>Which sound is this shape?</b> Your answers measure whether the Kiki/Bouba weave actually holds —
+data stays in your browser, exportable as JSON.</p>
+
+<div class="stage">
+  <div id="arena">
+    <button id="question" aria-label="the shape in question" data-sonic-role="button"></button>
+    <button id="foil" aria-label="hidden foil" data-sonic-role="button" tabindex="-1"></button>
+  </div>
+
+  <div class="panel" data-sonic="off">
+    <h2>WHICH SOUND IS THIS SHAPE?</h2>
+    <div class="row">
+      <button id="play-a">▶ Sound A</button>
+      <button id="play-b">▶ Sound B</button>
+    </div>
+    <div class="row">
+      <button id="pick-a" class="pick">A is the shape</button>
+      <button id="pick-b" class="pick">B is the shape</button>
+    </div>
+    <div id="verdict" role="status"></div>
+    <div class="score" id="score">—</div>
+    <div class="row">
+      <button id="export">⇩ export JSON</button>
+      <button id="reset">reset</button>
+    </div>
+    <p class="small">Method: 2AFC, roundness ∈ {0, ⅓, ⅔, 1}, random size & assignment per round.
+    Success criterion (PLAN RQ1): &gt;70% agreement. Headphones recommended.</p>
+  </div>
+</div>
+
+<script src="../dist/sonarium.iife.js"></script>
+<script>
+  const debug = (window.__sonariumDebug = { started: false, triggers: [], errors: [] });
+  window.addEventListener('error', (e) => debug.errors.push(String(e.message)));
+  // Engine scoped to the arena: UI clicks can't strum the page and pollute trials.
+  const space = (window.space = Sonarium.create({ root: document.getElementById('arena'), ambient: 0, listener: 'center' }));
+  space.on('start', () => { debug.started = true; });
+  space.on('trigger', (d) => debug.triggers.push(d.articulation));
+
+  const KEY = 'sonarium-lab-results';
+  const q = document.getElementById('question');
+  const foil = document.getElementById('foil');
+  let round = null;
+
+  function newRound() {
+    const r = [0, 0.33, 0.66, 1][Math.floor(Math.random() * 4)];
+    const size = 70 + Math.round(Math.random() * 130);
+    for (const [el, rr] of [[q, r], [foil, 1 - r]]) {
+      el.style.width = size + 'px';
+      el.style.height = size + 'px';
+      el.style.borderRadius = (rr * size) / 2 + 'px';
+    }
+    round = { r, size, matched: Math.random() < 0.5 ? 'a' : 'b', answered: false };
+    document.getElementById('verdict').textContent = '';
+    document.getElementById('verdict').className = '';
+    renderScore();
+  }
+
+  function play(which) {
+    if (!round) return;
+    const isMatch = which === round.matched;
+    space.excite(isMatch ? q : foil, 0.8, 'hit');
+  }
+
+  function pick(which) {
+    if (!round || round.answered) return;
+    round.answered = true;
+    const correct = which === round.matched;
+    const v = document.getElementById('verdict');
+    v.textContent = correct ? '✓ matched — the weave held' : `✗ that was the inverted shape's voice`;
+    v.className = correct ? 'good' : 'bad';
+    const results = JSON.parse(localStorage.getItem(KEY) || '[]');
+    results.push({ t: Date.now(), roundness: round.r, size: round.size, correct });
+    localStorage.setItem(KEY, JSON.stringify(results));
+    renderScore();
+    setTimeout(newRound, 1100);
+  }
+
+  function renderScore() {
+    const results = JSON.parse(localStorage.getItem(KEY) || '[]');
+    const n = results.length;
+    const ok = results.filter((x) => x.correct).length;
+    document.getElementById('score').innerHTML = n
+      ? `trials <b>${n}</b> · agreement <b>${((ok / n) * 100).toFixed(1)}%</b> ${ok / n > 0.7 && n >= 10 ? '· <b>RQ1 holding ✓</b>' : ''}`
+      : 'no trials yet — listen to A and B, then decide';
+  }
+
+  document.getElementById('play-a').addEventListener('click', () => play('a'));
+  document.getElementById('play-b').addEventListener('click', () => play('b'));
+  document.getElementById('pick-a').addEventListener('click', () => pick('a'));
+  document.getElementById('pick-b').addEventListener('click', () => pick('b'));
+  document.getElementById('export').addEventListener('click', () => {
+    const blob = new Blob([localStorage.getItem(KEY) || '[]'], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'sonarium-lab-results.json';
+    a.click();
+  });
+  document.getElementById('reset').addEventListener('click', () => { localStorage.removeItem(KEY); renderScore(); });
+
+  newRound();
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@
 import { Engine } from './core/engine'
 import type { SonariumOptions } from './types'
 
-export const version = '0.5.0'
+export const version = '0.6.0'
 
 export type {
   SonariumOptions, SonicProfile, Theme, VoiceRecipe, Role, Wave, SynthKind,
