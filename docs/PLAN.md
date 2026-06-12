@@ -206,7 +206,19 @@ The IRCAM-Spat-inspired spatial engine — see [SPATIAL.md](./SPATIAL.md) for th
 - Path forward (specified in SPATIAL.md §7): HOA orders 2–3, worklet decode with measured
   HRIRs, head tracking, AmbiX field export.
 
-### P2 — v0.3 "Chromatic" (next 1–2 sessions)
+### P2 — v0.3 "Woven 織" *(user-directed, 2026-06: shipped this session)*
+From mapping-table to **material model** — see [MATTER.md](./MATTER.md):
+- Four macro-dimensions (EDGE/MASS/TEXTURE/AIR) condensed from visual properties, each woven
+  into *bundles* of co-varying DSP parameters (Bregman fusion: co-varying cues = one object).
+- **Continuous spectra** synthesized per trigger (`genPartials`: rolloff × hollowness) replace
+  the 4-step waveform ladder; elongation → odd-harmonic "pipe" hollowness (physically true).
+- **Noise becomes first-class**: EDGE transient bursts (the /k/ of kiki), TEXTURE breath layer
+  (translucency/soft shadows = airy), scroll-velocity air-rush through the room tone.
+- **Reverb woven to the voice**: per-lane send *color* (dark sources bloom dark), round-source
+  send *bloom* over the note, MASS/AIR send scaling.
+- Feelability acceptance: every weave must pass a blindfold A/B (MATTER.md §4).
+
+### P3 — v0.4 "Chromatic" (next 1–2 sessions)
 - Color → brightness/warmth mapping (parse computed `background-color`/`color`, map luminance →
   filter cutoff, hue warmth → detune/chorus). Thesis: warm = energetic.
 - Typography mapping (font-size/weight → register/velocity; `font-family` serif/sans → ?
@@ -218,20 +230,20 @@ The IRCAM-Spat-inspired spatial engine — see [SPATIAL.md](./SPATIAL.md) for th
 - Listening-test page (`/lab`): the thesis mismatch experiment, online, collecting anonymous
   agreement scores for every mapping (data → MAPPING.md revisions).
 
-### P3 — v0.4 "Embodied"
+### P4 — v0.5 "Embodied"
 - Gesture grammar: flick/circle/shake-direction vocabulary on mobile; gamepad; Web MIDI in/out.
 - WebXR listener (page becomes a literal room in AR/VR); head-tracked HRTF where available.
 - Multi-user shared rooms (WebRTC data channels): hear other cursors as positioned voices —
   the thesis V7 multiplayer thread.
 - React/Vue/Svelte bindings (`<Sonarium>` provider; hooks for custom triggers).
 
-### P4 — v0.5 "Ecosystem"
+### P5 — v0.6 "Ecosystem"
 - Theme editor (visual mapper: drag curves between CSS properties and synth params — the thesis
   patcher, reborn); theme share/remix registry (JSON packs + gallery).
 - Site-author API for narrative scoring (sections as movements, scroll as timeline).
 - Performance: AudioWorklet ambience, shared HRTF panner pool benchmark.
 
-### P5 — v1.0 "Standard"
+### P6 — v1.0 "Standard"
 - Stability guarantees, full a11y audit with screen-reader users, i18n docs,
   spec write-up proposing `--sonic-*` conventions as a community standard, academic paper
   (CHI/NIME/ICAD) reporting RQ1–RQ5 results.

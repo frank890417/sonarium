@@ -202,6 +202,12 @@ export class Engine {
     this.pool = new VoicePool(this.backend, this.opts.maxVoices)
   }
 
+  /** MATTER.md §2.2 — scroll drivers report air movement; rides the room-tone noise. */
+  airRush(level: number): void {
+    if (this.state !== 'running' || this.muted || level <= 0.005) return
+    this.room?.rush(level)
+  }
+
   /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
   setPerceptual(partial: Partial<PerceptualFactors>): void {
     this.factors = resolveFactors({ ...this.factors, ...partial })

@@ -4,18 +4,20 @@
  */
 import type { Theme } from '../types'
 
+// v0.3: aurora speaks through the woven MatterVoice — geometry IS the instrument
+// (MATTER.md). fm bells (headings) and membrane thuds (media) stay as character voices.
 const aurora: Theme = {
   name: 'aurora',
-  defaults: { synthKind: 'synth', octaveShift: 0, baseVelocity: 0.8, releaseScale: 1 },
+  defaults: { synthKind: 'matter', octaveShift: 0, baseVelocity: 0.8, releaseScale: 1 },
   roles: {
-    toggle: { synthKind: 'synth', pinWave: 'triangle', baseVelocity: 0.7, releaseScale: 0.8 },
-    button: { synthKind: 'synth', baseVelocity: 0.9 },
-    link: { synthKind: 'synth', pinWave: 'sine', octaveShift: 1, baseVelocity: 0.6, releaseScale: 0.7 },
-    input: { synthKind: 'synth', pinWave: 'triangle', baseVelocity: 0.55, releaseScale: 1.6 },
+    toggle: { synthKind: 'matter', baseVelocity: 0.7, releaseScale: 0.8 },
+    button: { synthKind: 'matter', baseVelocity: 0.9 },
+    link: { synthKind: 'matter', octaveShift: 1, baseVelocity: 0.6, releaseScale: 0.7 },
+    input: { synthKind: 'matter', baseVelocity: 0.55, releaseScale: 1.6 },
     heading: { synthKind: 'fm', octaveShift: 0, baseVelocity: 0.75, releaseScale: 2.2 },
     media: { synthKind: 'membrane', octaveShift: -1, baseVelocity: 0.8 },
-    item: { synthKind: 'synth', pinWave: 'triangle', baseVelocity: 0.6, releaseScale: 0.8 },
-    text: { synthKind: 'synth', pinWave: 'sine', baseVelocity: 0.35, releaseScale: 1.8 },
+    item: { synthKind: 'matter', baseVelocity: 0.6, releaseScale: 0.8 },
+    text: { synthKind: 'matter', baseVelocity: 0.35, releaseScale: 1.8 },
   },
 }
 

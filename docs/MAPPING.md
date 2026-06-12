@@ -41,6 +41,11 @@ Nothing reaches the speaker without quantization (Invariant #2).
 | G12 | opacity | velocity scale | `vel ×= opacity` | — | fading things sound faint |
 | G13 | `box-shadow` blur px | reverb send | `clamp(blur/40, 0, 0.5)` | base send `0.18` | elevation floats in the room |
 
+> **v0.3 note:** for the default `'matter'` voice, G7's four-step ladder generalizes to a
+> *continuous* spectrum (`genPartials`: EDGE rolloff × elongation hollowness) and G8–G10 become
+> threads of the EDGE weave — see [MATTER.md](./MATTER.md) §2. The ladder remains authoritative
+> for `data-sonic-wave` overrides and non-matter synth kinds.
+
 ## 2. Structure → space & harmony (the page's identity)
 
 | # | Source | Target | Formula | Constants | Research |

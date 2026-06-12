@@ -232,6 +232,8 @@
       <label>height <input type="range" id="lab-h" min="40" max="240" value="90"></label>
       <label>roundness (kiki ◻ → bouba ◯) <input type="range" id="lab-r" min="0" max="100" value="30"></label>
       <label>horizontal position (stereo pan) <input type="range" id="lab-x" min="8" max="92" value="50"></label>
+      <label>shadow softness (floats into the room) <input type="range" id="lab-s" min="0" max="40" value="12"></label>
+      <label>opacity (solid tone → breathy air) <input type="range" id="lab-o" min="30" max="100" value="100"></label>
       <div id="lab-readout">click the shape to hear it — its acoustic profile appears here</div>
     </div>
   </div>
@@ -347,20 +349,27 @@
     lab.style.height = h + 'px';
     lab.style.borderRadius = r + 'px';
     lab.style.left = ctl('lab-x').value + '%';
+    lab.style.boxShadow = `0 12px ${ctl('lab-s').value}px rgba(0,0,0,.45)`;
+    lab.style.opacity = Number(ctl('lab-o').value) / 100;
     describeLab();
+    // profiles invalidate through a 150 ms mutation debounce — refresh once it settles
+    clearTimeout(applyLab._t);
+    applyLab._t = setTimeout(describeLab, 200);
   }
   function describeLab() {
     if (!space || !space.scanner) return;
     const p = space.describe(lab);
     if (!p) return;
+    const v = p.voice, m = v.matter;
     readout.innerHTML =
-      `<b>note</b>     ${Sonarium.midiToNoteName(p.midi)} (${p.freqHz.toFixed(1)} Hz)\n` +
-      `<b>wave</b>     ${p.wave}   <b>attack</b> ${(p.attack * 1000).toFixed(0)} ms   <b>Q</b> ${p.filterQ.toFixed(2)}\n` +
-      `<b>duration</b> ${p.durationS.toFixed(2)} s   <b>filter</b> ${Math.round(p.filterHz)} Hz\n` +
-      `<b>position</b> x ${p.pan.x.toFixed(1)} m, y ${p.pan.y.toFixed(1)} m, z ${p.pan.z.toFixed(1)} m\n` +
-      `<b>why</b>      ${p.reasons.timbre}`;
+      `<b>note</b>     ${Sonarium.midiToNoteName(p.midi)} (${p.freqHz.toFixed(1)} Hz)   <b>duration</b> ${p.durationS.toFixed(2)} s\n` +
+      `<b>matter</b>   edge ${m.edge.toFixed(2)} · mass ${m.mass.toFixed(2)} · texture ${m.texture.toFixed(2)} · air ${m.air.toFixed(2)}\n` +
+      `<b>weave</b>    attack ${(v.envelope.attackS * 1000).toFixed(0)} ms · burst ${(v.transient.level * 100).toFixed(0)}% · breath ${(v.breath.level * 100).toFixed(0)}%\n` +
+      `         ${v.subShimmer.interval < 0 ? 'sub −8va' : 'shimmer +8va'} ${(v.subShimmer.level * 100).toFixed(0)}% · glide ${(v.glideS * 1000).toFixed(0)} ms · Q ${v.filter.q.toFixed(2)}\n` +
+      `<b>room</b>     send ×${v.reverb.sendScale.toFixed(2)} · tail color ${Math.round(v.reverb.sendCutoffHz)} Hz · ${v.reverb.bloom > 0.5 ? 'blooms over the note' : 'dry strike'}\n` +
+      `<b>sphere</b>   az ${(p.sphere.azimuth / Sonarium.DEG).toFixed(0)}° · extent ${p.sphere.extent.toFixed(2)} · directivity ${p.sphere.directivity.toFixed(2)}`;
   }
-  for (const id of ['lab-w', 'lab-h', 'lab-r', 'lab-x']) ctl(id).addEventListener('input', applyLab);
+  for (const id of ['lab-w', 'lab-h', 'lab-r', 'lab-x', 'lab-s', 'lab-o']) ctl(id).addEventListener('input', applyLab);
   lab.addEventListener('click', () => setTimeout(describeLab, 50));
   applyLab();
 </script>

@@ -5,7 +5,7 @@ var __export = (target, all) => {
 };
 
 // src/core/engine.ts
-import * as Tone8 from "tone";
+import * as Tone9 from "tone";
 
 // src/math/util.ts
 var clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -86,16 +86,16 @@ function midiToNoteName(m) {
 // src/themes/index.ts
 var aurora = {
   name: "aurora",
-  defaults: { synthKind: "synth", octaveShift: 0, baseVelocity: 0.8, releaseScale: 1 },
+  defaults: { synthKind: "matter", octaveShift: 0, baseVelocity: 0.8, releaseScale: 1 },
   roles: {
-    toggle: { synthKind: "synth", pinWave: "triangle", baseVelocity: 0.7, releaseScale: 0.8 },
-    button: { synthKind: "synth", baseVelocity: 0.9 },
-    link: { synthKind: "synth", pinWave: "sine", octaveShift: 1, baseVelocity: 0.6, releaseScale: 0.7 },
-    input: { synthKind: "synth", pinWave: "triangle", baseVelocity: 0.55, releaseScale: 1.6 },
+    toggle: { synthKind: "matter", baseVelocity: 0.7, releaseScale: 0.8 },
+    button: { synthKind: "matter", baseVelocity: 0.9 },
+    link: { synthKind: "matter", octaveShift: 1, baseVelocity: 0.6, releaseScale: 0.7 },
+    input: { synthKind: "matter", baseVelocity: 0.55, releaseScale: 1.6 },
     heading: { synthKind: "fm", octaveShift: 0, baseVelocity: 0.75, releaseScale: 2.2 },
     media: { synthKind: "membrane", octaveShift: -1, baseVelocity: 0.8 },
-    item: { synthKind: "synth", pinWave: "triangle", baseVelocity: 0.6, releaseScale: 0.8 },
-    text: { synthKind: "synth", pinWave: "sine", baseVelocity: 0.35, releaseScale: 1.8 }
+    item: { synthKind: "matter", baseVelocity: 0.6, releaseScale: 0.8 },
+    text: { synthKind: "matter", baseVelocity: 0.35, releaseScale: 1.8 }
   }
 };
 var mono = {
@@ -549,15 +549,20 @@ var AmbisonicBackend = class {
   createOutput() {
     const enc = new SourceEncoder(this.bus.inputs);
     const send = new Tone4.Gain(0.15);
+    const sendColor = new Tone4.Filter({ type: "lowpass", frequency: 5e3, rolloff: -12 });
     enc.input.connect(send);
-    send.connect(this.room.reverb);
+    send.connect(sendColor);
+    sendColor.connect(this.room.reverb);
     enc.input.connect(this.foaRoom.erIn);
     const backend = this;
     return {
       input: enc.input,
       setPlacement(profile, when) {
+        const t = when ?? Tone4.now();
         const s = profile.sphere;
-        const g = foaGains(s.azimuth, s.elevation, s.extent);
+        const w = profile.voice.reverb;
+        const extent = clamp(s.extent + w.extentBonus, 0, 0.95);
+        const g = foaGains(s.azimuth, s.elevation, extent);
         const direct = directGain(backend.factors.presence) * directivityDirectGain(s.directivity);
         enc.set(g, direct, when);
         const wetSend = clamp(
@@ -565,11 +570,19 @@ var AmbisonicBackend = class {
           0,
           1.5
         );
-        send.gain.rampTo(wetSend, 0.02, when ?? Tone4.now());
+        sendColor.frequency.rampTo(w.sendCutoffHz, 0.02, t);
+        send.gain.cancelScheduledValues(t);
+        if (w.bloom > 0.35) {
+          send.gain.setValueAtTime(wetSend * 0.35, t);
+          send.gain.rampTo(wetSend, Math.max(0.08, profile.durationS), t);
+        } else {
+          send.gain.rampTo(wetSend, 0.02, t);
+        }
       },
       dispose() {
         enc.dispose();
         send.dispose();
+        sendColor.dispose();
       }
     };
   }
@@ -607,10 +620,12 @@ var PannerBackend = class {
     });
     const dry = new Tone4.Gain(1);
     const send = new Tone4.Gain(0.18);
+    const sendColor = new Tone4.Filter({ type: "lowpass", frequency: 5e3, rolloff: -12 });
     panner.connect(dry);
     panner.connect(send);
+    send.connect(sendColor);
     dry.connect(this.room.buses.dryIn);
-    send.connect(this.room.buses.wetIn);
+    sendColor.connect(this.room.buses.wetIn);
     return {
       input: panner,
       setPlacement(profile, when) {
@@ -618,12 +633,14 @@ var PannerBackend = class {
         panner.positionX.rampTo(profile.pan.x, 0.02, t);
         panner.positionY.rampTo(profile.pan.y, 0.02, t);
         panner.positionZ.rampTo(profile.pan.z, 0.02, t);
+        sendColor.frequency.rampTo(profile.voice.reverb.sendCutoffHz, 0.02, t);
         send.gain.rampTo(clamp(profile.reverbSend, 0, 1), 0.02, t);
       },
       dispose() {
         panner.dispose();
         dry.dispose();
         send.dispose();
+        sendColor.dispose();
       }
     };
   }
@@ -834,6 +851,7 @@ var Room = class {
     this.noise = null;
     this.noiseFilter = null;
     this.noiseGain = null;
+    this.rushGain = null;
     this.sparkle = null;
     this.resizeTimer = null;
     this.mutedNow = false;
@@ -884,6 +902,9 @@ var Room = class {
     this.noise.connect(this.noiseFilter);
     this.noiseFilter.connect(this.noiseGain);
     this.noiseGain.connect(this.spatialIn);
+    this.rushGain = new Tone6.Gain(0);
+    this.noiseFilter.connect(this.rushGain);
+    this.rushGain.connect(this.spatialIn);
     this.noise.start();
     this.sparkle = new Tone6.Loop((time) => {
       if (Math.random() > 0.4) return;
@@ -892,6 +913,14 @@ var Room = class {
     }, 2);
     this.sparkle.start(1);
     Tone6.getTransport().start();
+  }
+  /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
+  rush(level) {
+    if (!this.rushGain || this.mutedNow) return;
+    const now6 = Tone6.now();
+    this.rushGain.gain.cancelScheduledValues(now6);
+    this.rushGain.gain.rampTo(level, 0.05, now6);
+    this.rushGain.gain.rampTo(0, 0.45, now6 + 0.07);
   }
   /** I14 — never sound in a background tab. */
   setHidden(hidden) {
@@ -908,6 +937,7 @@ var Room = class {
     this.noise?.dispose();
     this.noiseFilter?.dispose();
     this.noiseGain?.dispose();
+    this.rushGain?.dispose();
     this.reverb.dispose();
     this.wetGain?.dispose();
     this.spatialIn.dispose();
@@ -917,6 +947,102 @@ var Room = class {
     this.limiter.dispose();
   }
 };
+
+// src/math/matter.ts
+var matter_exports = {};
+__export(matter_exports, {
+  PARTIAL_COUNT: () => PARTIAL_COUNT,
+  airRushGain: () => airRushGain,
+  breath: () => breath,
+  deriveMatter: () => deriveMatter,
+  detuneJitterCents: () => detuneJitterCents,
+  envelopeWeave: () => envelopeWeave,
+  filterWeave: () => filterWeave,
+  genPartials: () => genPartials,
+  glideS: () => glideS,
+  reverbWeave: () => reverbWeave,
+  subShimmer: () => subShimmer,
+  transient: () => transient
+});
+function deriveMatter(v) {
+  const texture = clamp(
+    clamp(v.shadowBlurPx / 40, 0, 0.4) + (1 - clamp(v.opacity, 0, 1)) * 0.6 + (v.dashedBorder ? 0.15 : 0) + (v.isMedia ? 0.35 : 0) + clamp(v.backdropBlurPx / 40, 0, 0.2),
+    0,
+    1
+  );
+  return {
+    edge: clamp(1 - v.roundness, 0, 1),
+    mass: clamp(v.sizeT, 0, 1),
+    texture,
+    air: clamp(Math.min(v.depth, 10) / 10, 0, 1)
+  };
+}
+var PARTIAL_COUNT = 24;
+function genPartials(edge, elongation) {
+  const p = 1 + 2.6 * (1 - clamp(edge, 0, 1));
+  const evenness = lerp(1, 0.12, clamp((elongation - 1) / 4, 0, 1));
+  const a = new Float32Array(PARTIAL_COUNT);
+  let energy = 0;
+  for (let k = 1; k <= PARTIAL_COUNT; k++) {
+    const amp = (k % 2 === 1 ? 1 : evenness) / Math.pow(k, p);
+    a[k - 1] = amp;
+    energy += amp * amp;
+  }
+  const norm2 = 1 / Math.sqrt(energy || 1);
+  for (let i = 0; i < PARTIAL_COUNT; i++) a[i] = a[i] * norm2;
+  return a;
+}
+function transient(edge) {
+  const e = clamp(edge, 0, 1);
+  return {
+    lengthS: lerp(5e-3, 0.025, e),
+    hpHz: 2e3 + 4e3 * e,
+    level: 0.7 * e
+  };
+}
+function breath(texture) {
+  const t = clamp(texture, 0, 1);
+  return { level: 0.22 * t, bpRatio: lerp(2.5, 1.2, t) };
+}
+var detuneJitterCents = (texture) => 6 * clamp(texture, 0, 1);
+function subShimmer(mass) {
+  const m = clamp(mass, 0, 1);
+  return {
+    interval: m >= 0.45 ? -12 : 12,
+    level: lerp(0.1, 0.38, clamp(Math.abs(m - 0.45) * 2, 0, 1))
+  };
+}
+var glideS = (edge) => lerp(0.028, 0, clamp(edge, 0, 1));
+function envelopeWeave(edge, mass) {
+  const e = clamp(edge, 0, 1);
+  const m = clamp(mass, 0, 1);
+  return {
+    attackS: lerp(0.045, 2e-3, e) + 8e-3 * m,
+    decayS: lerp(0.4, 0.12, e),
+    sustain: lerp(0.35, 0.15, e),
+    releaseScale: lerp(0.8, 1.5, m)
+  };
+}
+function filterWeave(edge) {
+  const e = clamp(edge, 0, 1);
+  return {
+    q: lerp(0.5, 2.4, e),
+    biteAmount: 1 + 3 * e,
+    biteDecayS: lerp(0.15, 0.06, e)
+  };
+}
+function reverbWeave(edge, mass, texture) {
+  const e = clamp(edge, 0, 1);
+  const m = clamp(mass, 0, 1);
+  const t = clamp(texture, 0, 1);
+  return {
+    sendScale: lerp(1.3, 0.7, e) * lerp(0.85, 1.15, m),
+    sendCutoffHz: lerp(1200, 7e3, e),
+    bloom: 1 - e,
+    extentBonus: 0.15 * t
+  };
+}
+var airRushGain = (pxPerMs) => clamp(pxPerMs * 0.06, 0, 0.18);
 
 // src/core/profile.ts
 var HEADING = /^H[1-6]$/;
@@ -990,7 +1116,8 @@ function profileOf(el, env) {
   const recipe = recipeFor(role, theme);
   reasons.role = `<${el.tagName.toLowerCase()}> reads as "${role}" \u2192 ${recipe.synthKind} voice (theme ${theme.name})`;
   const cs = getComputedStyle(el);
-  const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0;
+  const radiusRaw = cs.borderTopLeftRadius;
+  const radiusPx = radiusRaw.endsWith("%") ? (parseFloat(radiusRaw) || 0) / 100 * Math.min(rect.w, rect.h) : parseFloat(radiusRaw) || 0;
   const opacity = parseFloat(cs.opacity);
   const shadowBlur = parseShadowBlur(cs.boxShadow);
   const zIndex = cs.position !== "static" ? parseInt(cs.zIndex, 10) || 0 : 0;
@@ -1032,7 +1159,35 @@ function profileOf(el, env) {
   let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth) * (isNaN(opacity) ? 1 : opacity);
   if (isQuiet(el)) velocityScale *= 0.4;
   velocityScale = clamp(velocityScale, 0, 1.5);
-  const reverbSend = 0.18 + sendFromShadowBlur(shadowBlur);
+  const elongation = Math.max(rect.w, rect.h) / Math.max(1, Math.min(rect.w, rect.h));
+  const matter = deriveMatter({
+    roundness: round,
+    sizeT: st,
+    depth,
+    shadowBlurPx: shadowBlur,
+    opacity: isNaN(opacity) ? 1 : opacity,
+    dashedBorder: cs.borderTopStyle === "dashed" || cs.borderTopStyle === "dotted",
+    isMedia: role === "media",
+    backdropBlurPx: parseBackdropBlur(cs)
+  });
+  const voice = {
+    matter,
+    partials: Array.from(genPartials(matter.edge, elongation)),
+    transient: transient(matter.edge),
+    breath: breath(matter.texture),
+    subShimmer: subShimmer(matter.mass),
+    glideS: glideS(matter.edge),
+    jitterCents: detuneJitterCents(matter.texture),
+    envelope: envelopeWeave(matter.edge, matter.mass),
+    filter: filterWeave(matter.edge),
+    reverb: reverbWeave(matter.edge, matter.mass, matter.texture)
+  };
+  reasons.matter = `edge ${matter.edge.toFixed(2)} \xB7 mass ${matter.mass.toFixed(2)} \xB7 texture ${matter.texture.toFixed(2)} \xB7 air ${matter.air.toFixed(2)} \u2192 ${voice.transient.level > 0.1 ? "clicky" : "soft"}, ${voice.breath.level > 0.05 ? "breathy" : "clean"}, ${voice.subShimmer.interval < 0 ? "chest sub" : "sparkle +8va"}, ${voice.reverb.bloom > 0.5 ? "blooms into the room" : "dry strike"}`;
+  const reverbSend = clamp(
+    (0.18 + sendFromShadowBlur(shadowBlur) + 0.05 * Math.min(depth, 10) * 0.5) * voice.reverb.sendScale,
+    0,
+    1.2
+  );
   return {
     role,
     rect,
@@ -1051,8 +1206,14 @@ function profileOf(el, env) {
     reverbSend,
     synthKind: recipe.synthKind,
     octaveShift: recipe.octaveShift,
+    voice,
     reasons
   };
+}
+function parseBackdropBlur(cs) {
+  const bf = cs.backdropFilter || cs.webkitBackdropFilter || "";
+  const m = bf.match(/blur\((\d+(\.\d+)?)px\)/);
+  return m ? parseFloat(m[1]) : 0;
 }
 function parseShadowBlur(boxShadow) {
   if (!boxShadow || boxShadow === "none") return 0;
@@ -1237,7 +1398,95 @@ function safeProfile(el, env) {
 }
 
 // src/core/voices.ts
+import * as Tone8 from "tone";
+
+// src/core/matter-voice.ts
 import * as Tone7 from "tone";
+var MatterVoice = class {
+  constructor() {
+    this.startedSources = false;
+    this.out = new Tone7.Gain(1);
+    const mix = new Tone7.Gain(0.9);
+    this.oscA = new Tone7.Oscillator({ frequency: 220 });
+    this.oscB = new Tone7.Oscillator({ frequency: 110, type: "sine" });
+    this.oscBGain = new Tone7.Gain(0.2);
+    this.oscA.connect(mix);
+    this.oscB.connect(this.oscBGain);
+    this.oscBGain.connect(mix);
+    this.breathNoise = new Tone7.Noise("pink");
+    this.breathFilter = new Tone7.Filter({ type: "bandpass", frequency: 600, Q: 1.1 });
+    this.breathGain = new Tone7.Gain(0);
+    this.breathNoise.connect(this.breathFilter);
+    this.breathFilter.connect(this.breathGain);
+    this.breathGain.connect(mix);
+    this.ampEnv = new Tone7.AmplitudeEnvelope({ attack: 0.01, decay: 0.2, sustain: 0.25, release: 0.3 });
+    mix.connect(this.ampEnv);
+    this.ampEnv.connect(this.out);
+    this.burstNoise = new Tone7.Noise("white");
+    this.burstFilter = new Tone7.Filter({ type: "highpass", frequency: 3e3 });
+    this.burstEnv = new Tone7.AmplitudeEnvelope({ attack: 1e-3, decay: 0.02, sustain: 0, release: 0.02 });
+    this.burstNoise.connect(this.burstFilter);
+    this.burstFilter.connect(this.burstEnv);
+    this.burstEnv.connect(this.out);
+  }
+  connect(dest) {
+    this.out.connect(dest);
+    return this;
+  }
+  trigger(t, when) {
+    const v = t.voice;
+    if (!this.startedSources) {
+      this.startedSources = true;
+      this.oscA.start(when);
+      this.oscB.start(when);
+      this.breathNoise.start(when);
+      this.burstNoise.start(when);
+    }
+    this.oscA.partials = v.partials;
+    const jitter = (Math.random() * 2 - 1) * v.jitterCents;
+    this.oscA.detune.setValueAtTime(jitter, when);
+    if (v.glideS > 2e-3) {
+      this.oscA.frequency.setValueAtTime(t.freqHz * 0.917, when);
+      this.oscA.frequency.rampTo(t.freqHz, v.glideS, when);
+    } else {
+      this.oscA.frequency.setValueAtTime(t.freqHz, when);
+    }
+    this.oscB.frequency.setValueAtTime(t.freqHz * Math.pow(2, v.subShimmer.interval / 12), when);
+    this.oscBGain.gain.rampTo(v.subShimmer.level, 0.02, when);
+    this.breathFilter.frequency.rampTo(Math.min(8e3, t.freqHz * v.breath.bpRatio), 0.02, when);
+    this.breathGain.gain.rampTo(v.breath.level, 0.02, when);
+    this.ampEnv.attack = v.envelope.attackS;
+    this.ampEnv.decay = v.envelope.decayS;
+    this.ampEnv.sustain = v.envelope.sustain;
+    this.ampEnv.release = 0.3 * t.releaseScaleBase * v.envelope.releaseScale;
+    this.ampEnv.triggerAttackRelease(t.durationS, when, t.velocity);
+    if (v.transient.level > 0.02) {
+      this.burstFilter.frequency.setValueAtTime(v.transient.hpHz, when);
+      this.burstEnv.decay = v.transient.lengthS;
+      this.burstEnv.triggerAttackRelease(v.transient.lengthS, when, t.velocity * v.transient.level);
+    }
+  }
+  releaseTail() {
+    return this.ampEnv.release;
+  }
+  dispose() {
+    for (const n of [
+      this.oscA,
+      this.oscB,
+      this.oscBGain,
+      this.breathNoise,
+      this.breathFilter,
+      this.breathGain,
+      this.burstNoise,
+      this.burstFilter,
+      this.burstEnv,
+      this.ampEnv,
+      this.out
+    ]) n.dispose();
+  }
+};
+
+// src/core/voices.ts
 var VoicePool = class {
   constructor(backend, maxVoices) {
     this.backend = backend;
@@ -1247,21 +1496,23 @@ var VoicePool = class {
   }
   createSynth(kind) {
     switch (kind) {
+      case "matter":
+        return new MatterVoice();
       case "fm":
-        return new Tone7.FMSynth({ harmonicity: 3, modulationIndex: 8, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1.4 }, modulationEnvelope: { attack: 0.01, decay: 0.4, sustain: 0.2, release: 1 } });
+        return new Tone8.FMSynth({ harmonicity: 3, modulationIndex: 8, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1.4 }, modulationEnvelope: { attack: 0.01, decay: 0.4, sustain: 0.2, release: 1 } });
       case "pluck":
-        return new Tone7.PluckSynth({ attackNoise: 1, dampening: 3e3, resonance: 0.92 });
+        return new Tone8.PluckSynth({ attackNoise: 1, dampening: 3e3, resonance: 0.92 });
       case "membrane":
-        return new Tone7.MembraneSynth({ pitchDecay: 0.04, octaves: 5, envelope: { attack: 1e-3, decay: 0.35, sustain: 0.01, release: 0.6 } });
+        return new Tone8.MembraneSynth({ pitchDecay: 0.04, octaves: 5, envelope: { attack: 1e-3, decay: 0.35, sustain: 0.01, release: 0.6 } });
       case "noise":
-        return new Tone7.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 1e-3, decay: 0.06, sustain: 0, release: 0.05 } });
+        return new Tone8.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 1e-3, decay: 0.06, sustain: 0, release: 0.05 } });
       default:
-        return new Tone7.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.25, release: 0.3 } });
+        return new Tone8.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.25, release: 0.3 } });
     }
   }
   createLane(kind) {
     const synth = this.createSynth(kind);
-    const filter = new Tone7.Filter({ frequency: 4e3, type: "lowpass", rolloff: -12, Q: 1 });
+    const filter = new Tone8.Filter({ frequency: 4e3, type: "lowpass", rolloff: -12, Q: 1 });
     const out = this.backend.createOutput();
     synth.connect(filter);
     filter.connect(out.input);
@@ -1270,13 +1521,13 @@ var VoicePool = class {
     return lane;
   }
   acquire(kind) {
-    const now5 = Tone7.now();
+    const now6 = Tone8.now();
     let candidate = null;
     let oldestSameKind = null;
     let oldestAny = null;
     for (const lane of this.lanes) {
       if (lane.kind === kind) {
-        if (lane.busyUntil <= now5) {
+        if (lane.busyUntil <= now6) {
           candidate = lane;
           break;
         }
@@ -1298,15 +1549,36 @@ var VoicePool = class {
   trigger(profile, velocity, when) {
     const raw = velocity * profile.velocityScale;
     if (raw <= 0.01) return;
-    const t = when ?? Tone7.now();
+    const t = when ?? Tone8.now();
     const vel = clamp(raw, 0.03, 1);
     const lane = this.acquire(profile.synthKind);
-    lane.filter.frequency.rampTo(Math.max(200, profile.filterHz), 0.02, t);
-    lane.filter.Q.rampTo(profile.filterQ, 0.02, t);
+    const baseCutoff = Math.max(200, profile.filterHz);
+    if (lane.kind === "matter") {
+      const w = profile.voice;
+      lane.filter.Q.rampTo(w.filter.q, 0.02, t);
+      lane.filter.frequency.cancelScheduledValues(t);
+      lane.filter.frequency.setValueAtTime(Math.min(12e3, baseCutoff * w.filter.biteAmount), t);
+      lane.filter.frequency.exponentialRampTo(baseCutoff, w.filter.biteDecayS, t);
+    } else {
+      lane.filter.frequency.rampTo(baseCutoff, 0.02, t);
+      lane.filter.Q.rampTo(profile.filterQ, 0.02, t);
+    }
     lane.out.setPlacement(profile, t);
     const dur = profile.durationS;
     try {
       switch (lane.kind) {
+        case "matter": {
+          const mv = lane.synth;
+          mv.trigger({
+            freqHz: profile.freqHz,
+            velocity: vel,
+            durationS: dur,
+            releaseScaleBase: profile.release / 0.3,
+            voice: profile.voice
+          }, t);
+          lane.busyUntil = t + dur + mv.releaseTail();
+          return;
+        }
         case "noise": {
           ;
           lane.synth.triggerAttackRelease(Math.min(dur, 0.2), t, vel);
@@ -1345,8 +1617,8 @@ var VoicePool = class {
     }
   }
   get activeCount() {
-    const now5 = Tone7.now();
-    return this.lanes.filter((l) => l.busyUntil > now5).length;
+    const now6 = Tone8.now();
+    return this.lanes.filter((l) => l.busyUntil > now6).length;
   }
   dispose() {
     for (const lane of this.lanes) {
@@ -1371,9 +1643,9 @@ function attachPointer(engine) {
     if (!el) return;
     const profile = engine.scanner.profileFor(el);
     if (!profile || !PREVIEW_ROLES.has(profile.role)) return;
-    const now5 = performance.now();
-    if (now5 - (lastHover.get(el) ?? -Infinity) < HOVER_THROTTLE_MS) return;
-    lastHover.set(el, now5);
+    const now6 = performance.now();
+    if (now6 - (lastHover.get(el) ?? -Infinity) < HOVER_THROTTLE_MS) return;
+    lastHover.set(el, now6);
     engine.excite(el, 0.25, "preview");
   };
   window.addEventListener("pointermove", onMove, { passive: true });
@@ -1391,9 +1663,9 @@ function attachActivate(engine) {
   const activate = (target) => {
     const el = engine.scanner?.resolve(target);
     if (!el) return;
-    const now5 = performance.now();
-    if (now5 - (lastHit.get(el) ?? -Infinity) < DEDUPE_MS) return;
-    lastHit.set(el, now5);
+    const now6 = performance.now();
+    if (now6 - (lastHit.get(el) ?? -Infinity) < DEDUPE_MS) return;
+    lastHit.set(el, now6);
     const profile = engine.scanner.profileFor(el);
     if (!profile) return;
     if (profile.role === "toggle") return;
@@ -1440,9 +1712,9 @@ function attachKeyboard(engine) {
     const t = e.target;
     const editable = t instanceof HTMLElement && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable);
     if (!editable) return;
-    const now5 = performance.now();
-    if (now5 - lastTick < TICK_THROTTLE_MS) return;
-    lastTick = now5;
+    const now6 = performance.now();
+    if (now6 - lastTick < TICK_THROTTLE_MS) return;
+    lastTick = now6;
     const len = t.value?.length ?? t.textContent?.length ?? 0;
     const interval = FILL_INTERVALS[Math.min(FILL_INTERVALS.length - 1, Math.floor(len / 4))];
     engine.excite(t, 0.15, "tick", void 0, interval);
@@ -1458,12 +1730,20 @@ function attachKeyboard(engine) {
 // src/interact/scroll.ts
 function attachScroll(engine) {
   let scrollQueued = false;
+  let lastY = window.scrollY;
+  let lastT = performance.now();
   const onScroll = () => {
     if (scrollQueued) return;
     scrollQueued = true;
     requestAnimationFrame(() => {
       scrollQueued = false;
       engine.geometryChanged();
+      const now6 = performance.now();
+      const dt = Math.max(1, now6 - lastT);
+      const v = Math.abs(window.scrollY - lastY) / dt;
+      lastY = window.scrollY;
+      lastT = now6;
+      engine.airRush(airRushGain(v));
     });
   };
   let resizeQueued = false;
@@ -1499,9 +1779,9 @@ function attachMotion(engine) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null || a.y == null || a.z == null) return;
     const magnitude = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.81);
-    const now5 = performance.now();
-    if (magnitude > SHAKE_THRESHOLD && now5 - lastShake > SHAKE_REFRACTORY_MS) {
-      lastShake = now5;
+    const now6 = performance.now();
+    if (magnitude > SHAKE_THRESHOLD && now6 - lastShake > SHAKE_REFRACTORY_MS) {
+      lastShake = now6;
       engine.strum(engine.scanner.visibleElements(), 0.5);
     }
   };
@@ -1603,13 +1883,13 @@ var Engine = class {
     if (this.state === "running" || this.state === "disposed" || this.starting) return;
     this.starting = true;
     try {
-      await Promise.race([Tone8.start(), new Promise((r) => setTimeout(r, 1500))]);
+      await Promise.race([Tone9.start(), new Promise((r) => setTimeout(r, 1500))]);
     } catch (err) {
       console.warn("[sonarium] audio context could not start yet", err);
     } finally {
       this.starting = false;
     }
-    if (Tone8.getContext().state !== "running" || this.state === "disposed") return;
+    if (Tone9.getContext().state !== "running" || this.state === "disposed") return;
     this.state = "running";
     this.removeUnlockListeners();
     this.gate?.setState(this.muted ? "muted" : "on");
@@ -1658,6 +1938,11 @@ var Engine = class {
     this.rig = new ListenerRig(this.opts.listener);
     this.rig.start();
     this.pool = new VoicePool(this.backend, this.opts.maxVoices);
+  }
+  /** MATTER.md §2.2 — scroll drivers report air movement; rides the room-tone noise. */
+  airRush(level) {
+    if (this.state !== "running" || this.muted || level <= 5e-3) return;
+    this.room?.rush(level);
   }
   /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
   setPerceptual(partial) {
@@ -1720,7 +2005,7 @@ var Engine = class {
       const base = { ...profile, durationS: 0.12 };
       this.pool.trigger(base, velocity * this.opts.velocityFactor, when);
       const second = { ...profile, midi: profile.midi + dir * 7, freqHz: profile.freqHz * Math.pow(2, dir * 7 / 12), durationS: 0.16 };
-      this.pool.trigger(second, velocity * this.opts.velocityFactor, (when ?? Tone8.now()) + 0.09);
+      this.pool.trigger(second, velocity * this.opts.velocityFactor, (when ?? Tone9.now()) + 0.09);
     } else {
       this.pool.trigger(profile, velocity * this.opts.velocityFactor, when);
     }
@@ -1730,7 +2015,7 @@ var Engine = class {
   strum(els, velocity, articulation = "strum") {
     if (this.state !== "running" || !this.pool) return;
     const sorted = els.map((el) => ({ el, p: this.scanner.profileFor(el) })).filter((x) => !!x.p).sort((a, b) => a.p.rect.x - b.p.rect.x).slice(0, 6);
-    const t0 = Tone8.now();
+    const t0 = Tone9.now();
     sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * 0.06));
   }
   whisper(el) {
@@ -1754,7 +2039,7 @@ var Engine = class {
     });
     const byArea = candidates.map((el) => ({ el, area: el.getBoundingClientRect().width * el.getBoundingClientRect().height })).sort((a, b) => b.area - a.area).slice(0, 5).map((x) => x.el);
     const inDomOrder = candidates.filter((el) => byArea.includes(el));
-    const t0 = Tone8.now() + 0.1;
+    const t0 = Tone9.now() + 0.1;
     inDomOrder.forEach((el, i) => this.excite(el, 0.3, "motif", t0 + i * 0.09));
   }
   // ---------------------------------------------------------------- introspection
@@ -1791,7 +2076,7 @@ var Engine = class {
 };
 
 // src/index.ts
-var version = "0.2.0";
+var version = "0.3.0";
 function create(options = {}) {
   return new Engine(options);
 }
@@ -1835,6 +2120,7 @@ export {
   foaGains,
   lookMatrix,
   mapping_exports as mapping,
+  matter_exports as matter,
   midiToFreq,
   midiToNoteName,
   parseKey,

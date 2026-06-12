@@ -23,7 +23,7 @@ declare function midiToNoteName(m: number): string;
 
 type Wave = 'sine' | 'triangle' | 'sawtooth' | 'square';
 type Role = 'toggle' | 'button' | 'link' | 'input' | 'heading' | 'media' | 'item' | 'container' | 'text';
-type SynthKind = 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise';
+type SynthKind = 'matter' | 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise';
 type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif';
 interface Rect {
     x: number;
@@ -50,6 +50,49 @@ interface PerceptualFactors {
     warmth: number;
     brilliance: number;
 }
+/** The Matter weave, resolved per element (MATTER.md) — consumed by MatterVoice + backends. */
+interface MatterVoiceParams {
+    matter: {
+        edge: number;
+        mass: number;
+        texture: number;
+        air: number;
+    };
+    /** 24 additive partial amplitudes, energy-normalized (the continuous spectrum). */
+    partials: number[];
+    transient: {
+        lengthS: number;
+        hpHz: number;
+        level: number;
+    };
+    breath: {
+        level: number;
+        bpRatio: number;
+    };
+    subShimmer: {
+        interval: number;
+        level: number;
+    };
+    glideS: number;
+    jitterCents: number;
+    envelope: {
+        attackS: number;
+        decayS: number;
+        sustain: number;
+        releaseScale: number;
+    };
+    filter: {
+        q: number;
+        biteAmount: number;
+        biteDecayS: number;
+    };
+    reverb: {
+        sendScale: number;
+        sendCutoffHz: number;
+        bloom: number;
+        extentBonus: number;
+    };
+}
 /** The contract between page reading (L1) and the audio substrate (L0). See ARCHITECTURE.md §2. */
 interface SonicProfile {
     role: Role;
@@ -73,6 +116,9 @@ interface SonicProfile {
     reverbSend: number;
     synthKind: SynthKind;
     octaveShift: number;
+    /** The full Matter weave (MATTER.md) — always computed; the 'matter' voice consumes all of
+     *  it, other synth kinds consume the reverb/filter threads. */
+    voice: MatterVoiceParams;
     /** Human-readable provenance of every parameter — describe() truth (PLAN.md Invariant #6). */
     reasons: Record<string, string>;
 }
@@ -185,6 +231,7 @@ declare class Room {
     private noise;
     private noiseFilter;
     private noiseGain;
+    private rushGain;
     private sparkle;
     private resizeTimer;
     private mutedNow;
@@ -195,6 +242,8 @@ declare class Room {
     resize(vw: number): void;
     /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
     startAmbience(vw: number, level: number, pickSparkle: () => (() => void) | null): void;
+    /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
+    rush(level: number): void;
     /** I14 — never sound in a background tab. */
     setHidden(hidden: boolean): void;
     setMuted(muted: boolean): void;
@@ -387,6 +436,8 @@ declare class Engine {
      * browser, fall back to the v0.1 per-voice panner world rather than staying silent.
      */
     private buildAudioGraph;
+    /** MATTER.md §2.2 — scroll drivers report air movement; rides the room-tone noise. */
+    airRush(level: number): void;
     /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
     setPerceptual(partial: Partial<PerceptualFactors>): void;
     toggleMute(): void;
@@ -497,6 +548,117 @@ declare namespace mapping {
   export { mapping_ROOM_HALF_H as ROOM_HALF_H, mapping_ROOM_HALF_W as ROOM_HALF_W, mapping_ambienceCutoffFromViewport as ambienceCutoffFromViewport, mapping_attackFromRoundness as attackFromRoundness, mapping_brightnessTilt as brightnessTilt, mapping_cutoffFromDepth as cutoffFromDepth, mapping_degreeFromSize as degreeFromSize, mapping_durationFromElongation as durationFromElongation, mapping_panX as panX, mapping_panY as panY, mapping_pitchNudgeFromRoundness as pitchNudgeFromRoundness, mapping_qFromRoundness as qFromRoundness, mapping_reverbFromViewport as reverbFromViewport, mapping_roundness as roundness, mapping_sendFromShadowBlur as sendFromShadowBlur, mapping_sizeT as sizeT, mapping_stepsFromHeadingLevel as stepsFromHeadingLevel, mapping_stepsFromSiblingIndex as stepsFromSiblingIndex, mapping_velocityFromDepth as velocityFromDepth, mapping_velocityFromSize as velocityFromSize, mapping_waveFromRoundness as waveFromRoundness, mapping_zBonusFromZIndex as zBonusFromZIndex, mapping_zFromDepth as zFromDepth };
 }
 
+interface Matter {
+    /** boundary abruptness, kiki↔bouba: 1 − roundness */
+    edge: number;
+    /** size/weight: log-area sizeT */
+    mass: number;
+    /** surface noisiness/airiness: shadows, translucency, dashed borders, media */
+    texture: number;
+    /** distance into the room: normalized DOM depth */
+    air: number;
+}
+interface MatterVisuals {
+    roundness: number;
+    sizeT: number;
+    depth: number;
+    shadowBlurPx: number;
+    opacity: number;
+    dashedBorder: boolean;
+    isMedia: boolean;
+    backdropBlurPx: number;
+}
+declare function deriveMatter(v: MatterVisuals): Matter;
+declare const PARTIAL_COUNT = 24;
+/**
+ * Continuous spectrum: EDGE sets the rolloff (bright↔pure), elongation sets hollowness
+ * (long thin elements = pipes = odd harmonics). Normalized to Σa² = 1 so the whole continuum
+ * sits at equal loudness.
+ */
+declare function genPartials(edge: number, elongation: number): Float32Array;
+interface TransientSpec {
+    /** noise burst length, seconds */
+    lengthS: number;
+    /** high-pass corner of the burst, Hz */
+    hpHz: number;
+    /** burst level relative to the voice (×velocity) */
+    level: number;
+}
+/** EDGE → the /k/ of kiki: a filtered click at onset. edge 0 → none. */
+declare function transient(edge: number): TransientSpec;
+interface BreathSpec {
+    /** sustained airy layer level (0 = pure tone) */
+    level: number;
+    /** band-pass center as a ratio of the fundamental */
+    bpRatio: number;
+}
+/** TEXTURE → breath: translucent/soft-shadowed things are airy. */
+declare function breath(texture: number): BreathSpec;
+/** TEXTURE → detune jitter in cents (rough surfaces are pitch-unstable). */
+declare const detuneJitterCents: (texture: number) => number;
+interface SubShimmerSpec {
+    /** semitone offset of osc B: −12 chest sub for massive, +12 sparkle for tiny */
+    interval: number;
+    level: number;
+}
+/** MASS → the second oscillator: big = chest, tiny = sparkle. */
+declare function subShimmer(mass: number): SubShimmerSpec;
+/** ROUND → glide: the bouba swoop-in. Returns portamento seconds (0 for sharp). */
+declare const glideS: (edge: number) => number;
+interface EnvelopeSpec {
+    attackS: number;
+    decayS: number;
+    sustain: number;
+    releaseScale: number;
+}
+/** EDGE strikes, MASS adds inertia. */
+declare function envelopeWeave(edge: number, mass: number): EnvelopeSpec;
+interface FilterWeaveSpec {
+    q: number;
+    /** transient brightness bite: cutoff multiplier at onset, decaying to 1 */
+    biteAmount: number;
+    biteDecayS: number;
+}
+/** EDGE rings and bites. (Base cutoff itself comes from AIR via S2 + tilt, as before.) */
+declare function filterWeave(edge: number): FilterWeaveSpec;
+interface ReverbWeaveSpec {
+    /** multiplier on the profile's base send */
+    sendScale: number;
+    /** low-pass on the way into the reverb: dark sources bloom dark. Hz */
+    sendCutoffHz: number;
+    /** 0 = arrive at full send immediately (sharp); 1 = swell from 35% over the note (round) */
+    bloom: number;
+    /** spatial extent bonus from airy texture */
+    extentBonus: number;
+}
+declare function reverbWeave(edge: number, mass: number, texture: number): ReverbWeaveSpec;
+/** I8 — scroll velocity (px/ms) → air-rush gain on the room tone, decaying over ~400 ms. */
+declare const airRushGain: (pxPerMs: number) => number;
+
+type matter_BreathSpec = BreathSpec;
+type matter_EnvelopeSpec = EnvelopeSpec;
+type matter_FilterWeaveSpec = FilterWeaveSpec;
+type matter_Matter = Matter;
+type matter_MatterVisuals = MatterVisuals;
+declare const matter_PARTIAL_COUNT: typeof PARTIAL_COUNT;
+type matter_ReverbWeaveSpec = ReverbWeaveSpec;
+type matter_SubShimmerSpec = SubShimmerSpec;
+type matter_TransientSpec = TransientSpec;
+declare const matter_airRushGain: typeof airRushGain;
+declare const matter_breath: typeof breath;
+declare const matter_deriveMatter: typeof deriveMatter;
+declare const matter_detuneJitterCents: typeof detuneJitterCents;
+declare const matter_envelopeWeave: typeof envelopeWeave;
+declare const matter_filterWeave: typeof filterWeave;
+declare const matter_genPartials: typeof genPartials;
+declare const matter_glideS: typeof glideS;
+declare const matter_reverbWeave: typeof reverbWeave;
+declare const matter_subShimmer: typeof subShimmer;
+declare const matter_transient: typeof transient;
+declare namespace matter {
+  export { type matter_BreathSpec as BreathSpec, type matter_EnvelopeSpec as EnvelopeSpec, type matter_FilterWeaveSpec as FilterWeaveSpec, type matter_Matter as Matter, type matter_MatterVisuals as MatterVisuals, matter_PARTIAL_COUNT as PARTIAL_COUNT, type matter_ReverbWeaveSpec as ReverbWeaveSpec, type matter_SubShimmerSpec as SubShimmerSpec, type matter_TransientSpec as TransientSpec, matter_airRushGain as airRushGain, matter_breath as breath, matter_deriveMatter as deriveMatter, matter_detuneJitterCents as detuneJitterCents, matter_envelopeWeave as envelopeWeave, matter_filterWeave as filterWeave, matter_genPartials as genPartials, matter_glideS as glideS, matter_reverbWeave as reverbWeave, matter_subShimmer as subShimmer, matter_transient as transient };
+}
+
 /**
  * Pure spherical-harmonic encoding — SPATIAL.md §1–2. AmbiX: ACN order [W, Y, Z, X],
  * SN3D normalization, +x forward, +y left, +z up, +azimuth left. No DOM, no Tone.
@@ -581,7 +743,7 @@ declare namespace sphere {
  * Docs: https://github.com/frank890417/sonarium — start with docs/PLAN.md.
  */
 
-declare const version = "0.2.0";
+declare const version = "0.3.0";
 
 /**
  * Create a Sonarium instance. Safe to call before any user gesture: audio arms itself and
@@ -589,4 +751,4 @@ declare const version = "0.2.0";
  */
 declare function create(options?: SonariumOptions): Engine;
 
-export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, midiToFreq, midiToNoteName, parseKey, rotationMatrix, siteKey, sphere as sphereMapping, unitVector, version };
+export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, matter, midiToFreq, midiToNoteName, parseKey, rotationMatrix, siteKey, sphere as sphereMapping, unitVector, version };

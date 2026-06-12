@@ -8,8 +8,9 @@ import * as Tone from 'tone'
 import { clamp } from '../math/util'
 import type { SonicProfile, SynthKind } from '../types'
 import type { LaneOutput, SpatialBackend } from '../spatial/backend'
+import { MatterVoice } from './matter-voice'
 
-type AnySynth = Tone.Synth | Tone.FMSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.NoiseSynth
+type AnySynth = Tone.Synth | Tone.FMSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.NoiseSynth | MatterVoice
 
 interface Lane {
   kind: SynthKind
@@ -36,6 +37,8 @@ export class VoicePool {
 
   private createSynth(kind: SynthKind): AnySynth {
     switch (kind) {
+      case 'matter':
+        return new MatterVoice()
       case 'fm':
         return new Tone.FMSynth({ harmonicity: 3, modulationIndex: 8, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1.4 }, modulationEnvelope: { attack: 0.01, decay: 0.4, sustain: 0.2, release: 1 } })
       case 'pluck':
@@ -92,13 +95,35 @@ export class VoicePool {
     const vel = clamp(raw, 0.03, 1)
     const lane = this.acquire(profile.synthKind)
 
-    lane.filter.frequency.rampTo(Math.max(200, profile.filterHz), 0.02, t)
-    lane.filter.Q.rampTo(profile.filterQ, 0.02, t)
+    const baseCutoff = Math.max(200, profile.filterHz)
+    if (lane.kind === 'matter') {
+      // EDGE bite: the filter strikes bright then settles (MATTER.md filter weave).
+      const w = profile.voice
+      lane.filter.Q.rampTo(w.filter.q, 0.02, t)
+      lane.filter.frequency.cancelScheduledValues(t)
+      lane.filter.frequency.setValueAtTime(Math.min(12000, baseCutoff * w.filter.biteAmount), t)
+      lane.filter.frequency.exponentialRampTo(baseCutoff, w.filter.biteDecayS, t)
+    } else {
+      lane.filter.frequency.rampTo(baseCutoff, 0.02, t)
+      lane.filter.Q.rampTo(profile.filterQ, 0.02, t)
+    }
     lane.out.setPlacement(profile, t)
 
     const dur = profile.durationS
     try {
       switch (lane.kind) {
+        case 'matter': {
+          const mv = lane.synth as MatterVoice
+          mv.trigger({
+            freqHz: profile.freqHz,
+            velocity: vel,
+            durationS: dur,
+            releaseScaleBase: profile.release / 0.3,
+            voice: profile.voice,
+          }, t)
+          lane.busyUntil = t + dur + mv.releaseTail()
+          return
+        }
         case 'noise': {
           ;(lane.synth as Tone.NoiseSynth).triggerAttackRelease(Math.min(dur, 0.2), t, vel)
           break

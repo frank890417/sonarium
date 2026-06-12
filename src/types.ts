@@ -11,7 +11,7 @@ export type Role =
   | 'container'
   | 'text'
 
-export type SynthKind = 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise'
+export type SynthKind = 'matter' | 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise'
 
 export type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif'
 
@@ -43,6 +43,21 @@ export interface PerceptualFactors {
   brilliance: number
 }
 
+/** The Matter weave, resolved per element (MATTER.md) — consumed by MatterVoice + backends. */
+export interface MatterVoiceParams {
+  matter: { edge: number; mass: number; texture: number; air: number }
+  /** 24 additive partial amplitudes, energy-normalized (the continuous spectrum). */
+  partials: number[]
+  transient: { lengthS: number; hpHz: number; level: number }
+  breath: { level: number; bpRatio: number }
+  subShimmer: { interval: number; level: number }
+  glideS: number
+  jitterCents: number
+  envelope: { attackS: number; decayS: number; sustain: number; releaseScale: number }
+  filter: { q: number; biteAmount: number; biteDecayS: number }
+  reverb: { sendScale: number; sendCutoffHz: number; bloom: number; extentBonus: number }
+}
+
 /** The contract between page reading (L1) and the audio substrate (L0). See ARCHITECTURE.md §2. */
 export interface SonicProfile {
   role: Role
@@ -62,6 +77,9 @@ export interface SonicProfile {
   reverbSend: number
   synthKind: SynthKind
   octaveShift: number
+  /** The full Matter weave (MATTER.md) — always computed; the 'matter' voice consumes all of
+   *  it, other synth kinds consume the reverb/filter threads. */
+  voice: MatterVoiceParams
   /** Human-readable provenance of every parameter — describe() truth (PLAN.md Invariant #6). */
   reasons: Record<string, string>
 }

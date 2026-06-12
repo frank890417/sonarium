@@ -21,6 +21,13 @@ That's the whole integration. The page now *hears itself*:
   *sounds* from the left, decoded binaurally through virtual speakers. Moving the mouse doesn't
   move a listener point: it **rotates the entire field**, like turning your head.
   Spec: [docs/SPATIAL.md](./docs/SPATIAL.md) · live: [the Sound Sphere 聲球 demo](https://frank890417.github.io/sonarium/examples/sphere.html).
+- **Geometry is a material, not a setting (v0.3).** Visual properties condense into four
+  macro-dimensions — **edge, mass, texture, air** — and each one moves *bundles* of co-varying
+  cues, so the ear hears one coherent object: a sharp button literally **clicks** (a /k/ noise
+  burst), bites bright and stays dry; a round pill **glides in**, hums near-pure and *blooms*
+  into the reverb; a translucent card **breathes**; a long bar sounds **hollow** like the pipe
+  it is (odd harmonics — real physics). Spectra are synthesized per element (24 additive
+  partials), not picked from presets. The weave matrix: [docs/MATTER.md](./docs/MATTER.md).
 - **Every element is a sound sphere (聲球).** Size sets its *extent* — big blocks wrap around
   you, buttons are point sources; roundness sets its *directivity* — sharp elements beam at you,
   round ones radiate (Kiki/Bouba extended into space). Five Spat-style perceptual factors
@@ -175,7 +182,10 @@ Build `npm run build` · test `npm test` · demos `npm run serve` → `/examples
 **v0.2 "Spherical" — shipped**: the ambisonic field, the sound sphere, Spat perceptual factors
 ([docs/SPATIAL.md](./docs/SPATIAL.md)); next there: HOA orders 2–3, worklet decode with measured
 HRIRs, head tracking, AmbiX field export.
-**v0.3 "Chromatic"** — color→brightness mapping, `--sonic-*` CSS custom properties (a real aural
+**v0.3 "Woven 織" — shipped**: the Matter model ([docs/MATTER.md](./docs/MATTER.md)) — continuous
+per-element spectra, transient bursts, breath layers, glides, reverb color/bloom, scroll
+air-rush; every weave carries a blindfold-test acceptance criterion.
+**v0.4 "Chromatic"** — color→brightness mapping, `--sonic-*` CSS custom properties (a real aural
 stylesheet), drag glissandi, adaptive ducking, npm publish, and `/lab`: an online replication of
 the thesis mismatch experiment to validate every mapping with real listeners.
 **v0.4 "Embodied"** — gesture grammar, Web MIDI, WebXR listener, multi-user rooms (hear other
@@ -187,6 +197,12 @@ Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
 
 **Sonarium 讓任何網頁加上一行 script，就變成一個立體聲學空間。**
 
+- **幾何是材質，不是參數**（v0.3）：視覺屬性凝聚成四個宏觀維度 — **銳（edge）、質（mass）、
+  紋（texture）、距（air）** — 每個維度同時牽動一整束同步變化的聲音線索（Bregman 聽覺場景分析：
+  同步共變的線索會融合成「一個物體」）。尖銳的按鈕真的會「喀」一聲（/k/ 噪聲爆發）、亮且乾；
+  圓潤的膠囊滑音進場、近乎純音、並在音符過程中「綻放」進殘響；半透明的卡片有氣音；細長的條狀
+  元素是中空的管子（奇次諧波 — 真實物理）。頻譜逐元素即時合成（24 個加法泛音），不再是四種
+  預設波形。完整編織矩陣：[docs/MATTER.md](./docs/MATTER.md)。
 - **整個頁面是一個 Ambisonic 聲場**（v0.2）：所有元素編碼進同一個可旋轉的全球面聲場（AmbiX FOA），
   以 IRCAM Spat 的架構管理 — 滑鼠移動不是移動「聽者的點」，而是**旋轉整個聲場**，就像轉頭一樣；
   手機上則由裝置姿態驅動。規格書：[docs/SPATIAL.md](./docs/SPATIAL.md)，

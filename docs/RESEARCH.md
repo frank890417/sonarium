@@ -77,6 +77,11 @@ Sonarium's mappings sit on well-replicated psychology, not taste:
 - **Game audio middleware (Wwise, FMOD)** — the "objects in a room + listener + buses" model is
   standard in games; Sonarium ports the model to the DOM, where the scene graph is the DOM tree
   and the camera is the cursor/viewport.
+- **Timbre spaces & auditory fusion (v0.3)** — Grey's and McAdams' multidimensional timbre
+  scaling (attack / spectral centroid / flux are *the* perceptual axes) and Bregman's auditory
+  scene analysis (co-varying cues fuse into one object) justify the Matter weave: macro
+  visual dimensions drive bundles of co-varying parameters instead of isolated knobs.
+  Full treatment: [MATTER.md](./MATTER.md).
 - **Ambisonics & IRCAM Spat (v0.2)** — Gerzon's periphony, Daniel's HOA theory, the AmbiX
   convention, Jot's Spat architecture and Jullien's perceptual factors (presence, warmth,
   envelopment…) ground the v0.2 spatial engine; full treatment and citations in

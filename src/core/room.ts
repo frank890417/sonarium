@@ -32,6 +32,7 @@ export class Room {
   private noise: Tone.Noise | null = null
   private noiseFilter: Tone.Filter | null = null
   private noiseGain: Tone.Gain | null = null
+  private rushGain: Tone.Gain | null = null
   private sparkle: Tone.Loop | null = null
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private mutedNow = false
@@ -89,6 +90,10 @@ export class Room {
     this.noise.connect(this.noiseFilter)
     this.noiseFilter.connect(this.noiseGain)
     this.noiseGain.connect(this.spatialIn)
+    // Air-rush path (MATTER.md §2.2): scroll velocity swells the same room-tone noise.
+    this.rushGain = new Tone.Gain(0)
+    this.noiseFilter.connect(this.rushGain)
+    this.rushGain.connect(this.spatialIn)
     this.noise.start()
 
     this.sparkle = new Tone.Loop((time) => {
@@ -98,6 +103,15 @@ export class Room {
     }, 2)
     this.sparkle.start(1)
     Tone.getTransport().start()
+  }
+
+  /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
+  rush(level: number): void {
+    if (!this.rushGain || this.mutedNow) return
+    const now = Tone.now()
+    this.rushGain.gain.cancelScheduledValues(now)
+    this.rushGain.gain.rampTo(level, 0.05, now)
+    this.rushGain.gain.rampTo(0, 0.45, now + 0.07)
   }
 
   /** I14 — never sound in a background tab. */
@@ -117,6 +131,7 @@ export class Room {
     this.noise?.dispose()
     this.noiseFilter?.dispose()
     this.noiseGain?.dispose()
+    this.rushGain?.dispose()
     this.reverb.dispose()
     this.wetGain?.dispose()
     this.spatialIn.dispose()

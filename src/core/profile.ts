@@ -10,10 +10,14 @@ import {
 } from '../math/mapping'
 import { clamp } from '../math/util'
 import { degreeToMidi, midiToFreq, midiToNoteName, type SiteKey } from '../math/scales'
+import {
+  breath, deriveMatter, detuneJitterCents, envelopeWeave, filterWeave, genPartials, glideS,
+  reverbWeave, subShimmer, transient,
+} from '../math/matter'
 import { directivityFromRoundness, extentFromSize, sphereFromRect } from '../spatial/sphere'
 import { directivityFilterScale } from '../spatial/perceptual'
 import { DEG } from '../spatial/sh'
-import type { Rect, Role, SonicProfile, SphereProps, Theme, VoiceRecipe, Wave } from '../types'
+import type { MatterVoiceParams, Rect, Role, SonicProfile, SphereProps, Theme, VoiceRecipe, Wave } from '../types'
 
 const HEADING = /^H[1-6]$/
 
@@ -104,7 +108,11 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
   reasons.role = `<${el.tagName.toLowerCase()}> reads as "${role}" → ${recipe.synthKind} voice (theme ${theme.name})`
 
   const cs = getComputedStyle(el)
-  const radiusPx = parseFloat(cs.borderTopLeftRadius) || 0
+  // border-radius percentages survive into computed style — resolve against the box.
+  const radiusRaw = cs.borderTopLeftRadius
+  const radiusPx = radiusRaw.endsWith('%')
+    ? ((parseFloat(radiusRaw) || 0) / 100) * Math.min(rect.w, rect.h)
+    : parseFloat(radiusRaw) || 0
   const opacity = parseFloat(cs.opacity)
   const shadowBlur = parseShadowBlur(cs.boxShadow)
   const zIndex = cs.position !== 'static' ? parseInt(cs.zIndex, 10) || 0 : 0
@@ -163,8 +171,38 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
   if (isQuiet(el)) velocityScale *= 0.4
   velocityScale = clamp(velocityScale, 0, 1.5)
 
-  // Room (G13)
-  const reverbSend = 0.18 + sendFromShadowBlur(shadowBlur)
+  // The Matter weave (MATTER.md §2) — one material, many co-varying cues.
+  const elongation = Math.max(rect.w, rect.h) / Math.max(1, Math.min(rect.w, rect.h))
+  const matter = deriveMatter({
+    roundness: round,
+    sizeT: st,
+    depth,
+    shadowBlurPx: shadowBlur,
+    opacity: isNaN(opacity) ? 1 : opacity,
+    dashedBorder: cs.borderTopStyle === 'dashed' || cs.borderTopStyle === 'dotted',
+    isMedia: role === 'media',
+    backdropBlurPx: parseBackdropBlur(cs),
+  })
+  const voice: MatterVoiceParams = {
+    matter,
+    partials: Array.from(genPartials(matter.edge, elongation)),
+    transient: transient(matter.edge),
+    breath: breath(matter.texture),
+    subShimmer: subShimmer(matter.mass),
+    glideS: glideS(matter.edge),
+    jitterCents: detuneJitterCents(matter.texture),
+    envelope: envelopeWeave(matter.edge, matter.mass),
+    filter: filterWeave(matter.edge),
+    reverb: reverbWeave(matter.edge, matter.mass, matter.texture),
+  }
+  reasons.matter = `edge ${matter.edge.toFixed(2)} · mass ${matter.mass.toFixed(2)} · texture ${matter.texture.toFixed(2)} · air ${matter.air.toFixed(2)} → ${voice.transient.level > 0.1 ? 'clicky' : 'soft'}, ${voice.breath.level > 0.05 ? 'breathy' : 'clean'}, ${voice.subShimmer.interval < 0 ? 'chest sub' : 'sparkle +8va'}, ${voice.reverb.bloom > 0.5 ? 'blooms into the room' : 'dry strike'}`
+
+  // Room (G13 + MATTER reverb weave + SP3 distance wetness)
+  const reverbSend = clamp(
+    (0.18 + sendFromShadowBlur(shadowBlur) + 0.05 * Math.min(depth, 10) * 0.5) * voice.reverb.sendScale,
+    0,
+    1.2,
+  )
 
   return {
     role, rect, pan, sphere,
@@ -173,8 +211,15 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
     filterHz, filterQ: qFromRoundness(round),
     velocityScale, reverbSend,
     synthKind: recipe.synthKind, octaveShift: recipe.octaveShift,
+    voice,
     reasons,
   }
+}
+
+function parseBackdropBlur(cs: CSSStyleDeclaration): number {
+  const bf = cs.backdropFilter || (cs as unknown as Record<string, string>).webkitBackdropFilter || ''
+  const m = bf.match(/blur\((\d+(\.\d+)?)px\)/)
+  return m ? parseFloat(m[1] as string) : 0
 }
 
 function parseShadowBlur(boxShadow: string): number {

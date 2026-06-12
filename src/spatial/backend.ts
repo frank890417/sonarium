@@ -52,15 +52,21 @@ export class AmbisonicBackend implements SpatialBackend {
   createOutput(): LaneOutput {
     const enc = new SourceEncoder(this.bus.inputs)
     const send = new Tone.Gain(0.15)
+    // MATTER.md reverb weave: dark sources bloom dark — the tail is colored per voice.
+    const sendColor = new Tone.Filter({ type: 'lowpass', frequency: 5000, rolloff: -12 })
     enc.input.connect(send)
-    send.connect(this.room.reverb)
+    send.connect(sendColor)
+    sendColor.connect(this.room.reverb)
     enc.input.connect(this.foaRoom.erIn)
     const backend = this
     return {
       input: enc.input,
       setPlacement(profile: SonicProfile, when?: number) {
+        const t = when ?? Tone.now()
         const s = profile.sphere
-        const g = foaGains(s.azimuth, s.elevation, s.extent)
+        const w = profile.voice.reverb
+        const extent = clamp(s.extent + w.extentBonus, 0, 0.95)
+        const g = foaGains(s.azimuth, s.elevation, extent)
         const direct = directGain(backend.factors.presence) * directivityDirectGain(s.directivity)
         enc.set(g, direct, when)
         const wetSend = clamp(
@@ -68,11 +74,20 @@ export class AmbisonicBackend implements SpatialBackend {
           0,
           1.5,
         )
-        send.gain.rampTo(wetSend, 0.02, when ?? Tone.now())
+        sendColor.frequency.rampTo(w.sendCutoffHz, 0.02, t)
+        send.gain.cancelScheduledValues(t)
+        if (w.bloom > 0.35) {
+          // round sources swell into the room over the note; sharp ones arrive dry-then-done
+          send.gain.setValueAtTime(wetSend * 0.35, t)
+          send.gain.rampTo(wetSend, Math.max(0.08, profile.durationS), t)
+        } else {
+          send.gain.rampTo(wetSend, 0.02, t)
+        }
       },
       dispose() {
         enc.dispose()
         send.dispose()
+        sendColor.dispose()
       },
     }
   }
@@ -114,10 +129,12 @@ export class PannerBackend implements SpatialBackend {
     })
     const dry = new Tone.Gain(1)
     const send = new Tone.Gain(0.18)
+    const sendColor = new Tone.Filter({ type: 'lowpass', frequency: 5000, rolloff: -12 })
     panner.connect(dry)
     panner.connect(send)
+    send.connect(sendColor)
     dry.connect(this.room.buses.dryIn)
-    send.connect(this.room.buses.wetIn)
+    sendColor.connect(this.room.buses.wetIn)
     return {
       input: panner,
       setPlacement(profile: SonicProfile, when?: number) {
@@ -125,12 +142,14 @@ export class PannerBackend implements SpatialBackend {
         panner.positionX.rampTo(profile.pan.x, 0.02, t)
         panner.positionY.rampTo(profile.pan.y, 0.02, t)
         panner.positionZ.rampTo(profile.pan.z, 0.02, t)
+        sendColor.frequency.rampTo(profile.voice.reverb.sendCutoffHz, 0.02, t)
         send.gain.rampTo(clamp(profile.reverbSend, 0, 1), 0.02, t)
       },
       dispose() {
         panner.dispose()
         dry.dispose()
         send.dispose()
+        sendColor.dispose()
       },
     }
   }
