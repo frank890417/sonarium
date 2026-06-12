@@ -14,6 +14,10 @@ import {
   breath, deriveMatter, detuneJitterCents, envelopeWeave, filterWeave, genPartials, glideS,
   reverbWeave, subShimmer, transient,
 } from '../math/matter'
+import {
+  attackScaleFromWarmth, brightnessFromLuminance, chromaOf, parseCssColor,
+  richnessFromSaturation, subBonusFromWarmth, velocityFromLuminance, type Chroma,
+} from '../math/chroma'
 import { directivityFromRoundness, extentFromSize, sphereFromRect } from '../spatial/sphere'
 import { directivityFilterScale } from '../spatial/perceptual'
 import { DEG } from '../spatial/sh'
@@ -95,19 +99,26 @@ export interface ProfileEnv {
   vh: number
 }
 
+/** CSS custom property, trimmed; '' when unset. Inherits down the tree (the aural stylesheet). */
+function sonicVar(cs: CSSStyleDeclaration, name: string): string {
+  return cs.getPropertyValue(name).trim()
+}
+
 /** Compute the full acoustic identity of an element. Pure given (el state, env). */
 export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
   const { key, theme, vw, vh } = env
   const html = el as HTMLElement
   const reasons: Record<string, string> = {}
 
+  const cs = getComputedStyle(el)
   const r = el.getBoundingClientRect()
   const rect: Rect = { x: r.x, y: r.y, w: Math.max(1, r.width), h: Math.max(1, r.height) }
-  const role = roleOf(el)
+  // Priority: data-sonic-role > --sonic-role > inference (CHROMA.md §4).
+  const role = (html.dataset?.sonicRole as Role | undefined)
+    || (sonicVar(cs, '--sonic-role') as Role | '')
+    || roleOf(el)
   const recipe = recipeFor(role, theme)
   reasons.role = `<${el.tagName.toLowerCase()}> reads as "${role}" → ${recipe.synthKind} voice (theme ${theme.name})`
-
-  const cs = getComputedStyle(el)
   // border-radius percentages survive into computed style — resolve against the box.
   const radiusRaw = cs.borderTopLeftRadius
   const radiusPx = radiusRaw.endsWith('%')
@@ -136,14 +147,17 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
     steps += stepsFromHeadingLevel(level)
   }
   steps += recipe.octaveShift * key.scale.length
-  const pinned = pinnedMidi(html.dataset?.sonicNote)
+  const pinned = pinnedMidi(html.dataset?.sonicNote ?? sonicVar(cs, '--sonic-note') ?? undefined)
   const midi = pinned ?? degreeToMidi(degree, key, steps)
   reasons.pitch = pinned !== null
     ? `pinned by data-sonic-note → ${midiToNoteName(midi)}`
     : `area ${(rect.w * rect.h / 1000).toFixed(1)}k px² (size ${st.toFixed(2)}) + sibling/heading offsets → ${midiToNoteName(midi)} in ${key.label}`
 
   // Timbre (G6–G9) — Kiki/Bouba
-  const wave: Wave = (html.dataset?.sonicWave as Wave) || recipe.pinWave || waveFromRoundness(round)
+  const wave: Wave = (html.dataset?.sonicWave as Wave)
+    || (sonicVar(cs, '--sonic-wave') as Wave | '')
+    || recipe.pinWave
+    || waveFromRoundness(round)
   const attack = attackFromRoundness(round)
   reasons.timbre = `roundness ${round.toFixed(2)} (radius ${radiusPx}px) → ${wave} wave, ${(attack * 1000).toFixed(0)} ms attack`
 
@@ -153,7 +167,7 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
 
   // Sphere — the 聲球 (SPATIAL.md SP1–SP5)
   const dir = sphereFromRect(rect, vw, vh)
-  const extentOverride = parseFloat(html.dataset?.sonicExtent ?? '')
+  const extentOverride = parseFloat(html.dataset?.sonicExtent ?? sonicVar(cs, '--sonic-extent'))
   const sphere: SphereProps = {
     azimuth: dir.azimuth,
     elevation: dir.elevation,
@@ -162,13 +176,23 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
   }
   reasons.sphere = `az ${(sphere.azimuth / DEG).toFixed(0)}°, el ${(sphere.elevation / DEG).toFixed(0)}°, extent ${sphere.extent.toFixed(2)} (size wraps the listener), directivity ${sphere.directivity.toFixed(2)} (sharp beams, round radiates)`
 
-  // Filter (S2 · G3, G9) — directivity nudges brightness (SPATIAL.md §2)
-  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh) * directivityFilterScale(sphere.directivity)
-  reasons.filter = `depth ${depth} + vertical position + directivity → low-pass ${Math.round(filterHz)} Hz`
+  // The Chroma weave (CHROMA.md §1) — the element's color as mood, extracted once, used below.
+  const chroma = elementChroma(el, cs, role)
 
-  // Loudness (G5, G12, S3, quiet)
-  let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth) * (isNaN(opacity) ? 1 : opacity)
-  if (isQuiet(el)) velocityScale *= 0.4
+  // Filter (S2 · G3, G9, CH1) — depth, height, directivity and color luminance share the cutoff
+  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh)
+    * directivityFilterScale(sphere.directivity) * brightnessFromLuminance(chroma.luminance)
+  reasons.filter = `depth ${depth} + vertical position + directivity + luminance → low-pass ${Math.round(filterHz)} Hz`
+
+  // Loudness (G5, G12, S3, CH2, quiet via attribute or --sonic custom property)
+  let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth)
+    * (isNaN(opacity) ? 1 : opacity) * velocityFromLuminance(chroma.luminance)
+  const sonicMode = sonicVar(cs, '--sonic')
+  if (isQuiet(el) || sonicMode === 'quiet') velocityScale *= 0.4
+  if (sonicMode === 'off') {
+    velocityScale = 0
+    reasons.silenced = '--sonic: off (aural stylesheet)'
+  }
   velocityScale = clamp(velocityScale, 0, 1.5)
 
   // The Matter weave (MATTER.md §2) — one material, many co-varying cues.
@@ -183,18 +207,25 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
     isMedia: role === 'media',
     backdropBlurPx: parseBackdropBlur(cs),
   })
+  // Chroma tints the matter (CH3–CH5) — never a second instrument.
+  const env0 = envelopeWeave(matter.edge, matter.mass)
+  const sub0 = subShimmer(matter.mass)
   const voice: MatterVoiceParams = {
     matter,
-    partials: Array.from(genPartials(matter.edge, elongation)),
+    partials: Array.from(genPartials(matter.edge, elongation, richnessFromSaturation(chroma.saturation))),
     transient: transient(matter.edge),
     breath: breath(matter.texture),
-    subShimmer: subShimmer(matter.mass),
+    subShimmer: {
+      interval: sub0.interval,
+      level: sub0.level + (sub0.interval < 0 ? subBonusFromWarmth(chroma.warmth) : 0),
+    },
     glideS: glideS(matter.edge),
     jitterCents: detuneJitterCents(matter.texture),
-    envelope: envelopeWeave(matter.edge, matter.mass),
+    envelope: { ...env0, attackS: env0.attackS * attackScaleFromWarmth(chroma.warmth) },
     filter: filterWeave(matter.edge),
     reverb: reverbWeave(matter.edge, matter.mass, matter.texture),
   }
+  reasons.chroma = `warmth ${chroma.warmth.toFixed(2)} · sat ${chroma.saturation.toFixed(2)} · lum ${chroma.luminance.toFixed(2)} → ${chroma.warmth > 0.6 ? 'eager onset, full body' : chroma.warmth < 0.4 ? 'cool, unhurried onset' : 'neutral temperament'}${chroma.saturation > 0.5 ? ', vivid spectrum' : ''}`
   reasons.matter = `edge ${matter.edge.toFixed(2)} · mass ${matter.mass.toFixed(2)} · texture ${matter.texture.toFixed(2)} · air ${matter.air.toFixed(2)} → ${voice.transient.level > 0.1 ? 'clicky' : 'soft'}, ${voice.breath.level > 0.05 ? 'breathy' : 'clean'}, ${voice.subShimmer.interval < 0 ? 'chest sub' : 'sparkle +8va'}, ${voice.reverb.bloom > 0.5 ? 'blooms into the room' : 'dry strike'}`
 
   // Room (G13 + MATTER reverb weave + SP3 distance wetness)
@@ -211,9 +242,26 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
     filterHz, filterQ: qFromRoundness(round),
     velocityScale, reverbSend,
     synthKind: recipe.synthKind, octaveShift: recipe.octaveShift,
-    voice,
+    voice, chroma,
     reasons,
   }
+}
+
+/** CHROMA.md §1 — text-ish roles speak in their text color; boxes speak in their background,
+ *  walking up past transparent ancestors. */
+function elementChroma(el: Element, cs: CSSStyleDeclaration, role: Role): Chroma {
+  if (role === 'text' || role === 'heading' || role === 'link') {
+    return chromaOf(parseCssColor(cs.color))
+  }
+  let probe: Element | null = el
+  let style: CSSStyleDeclaration | undefined = cs
+  for (let hops = 0; probe && hops < 6; hops++) {
+    const rgb = parseCssColor((style ?? getComputedStyle(probe)).backgroundColor)
+    if (rgb && rgb.a >= 0.05) return chromaOf(rgb)
+    probe = probe.parentElement
+    style = undefined
+  }
+  return chromaOf(parseCssColor(getComputedStyle(document.documentElement).backgroundColor))
 }
 
 function parseBackdropBlur(cs: CSSStyleDeclaration): number {

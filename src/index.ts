@@ -14,7 +14,7 @@
 import { Engine } from './core/engine'
 import type { SonariumOptions } from './types'
 
-export const version = '0.3.0'
+export const version = '0.4.0'
 
 export type {
   SonariumOptions, SonicProfile, Theme, VoiceRecipe, Role, Wave, SynthKind,
@@ -24,6 +24,8 @@ export { THEMES } from './themes/index'
 export { siteKey, parseKey, degreeToMidi, midiToFreq, midiToNoteName, SCALES } from './math/scales'
 export * as mapping from './math/mapping'
 export * as matter from './math/matter'
+export * as chroma from './math/chroma'
+export * as pulse from './math/pulse'
 // The pure spatial layer (SPATIAL.md) — reusable beyond the DOM.
 export { foaGains, unitVector, DEG } from './spatial/sh'
 export { rotationMatrix, lookMatrix, applyMat3 } from './spatial/rotation'

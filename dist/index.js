@@ -83,6 +83,124 @@ function midiToNoteName(m) {
   return `${PC_TO_NOTE[pc]}${Math.floor(m / 12) - 1}`;
 }
 
+// src/math/chroma.ts
+var chroma_exports = {};
+__export(chroma_exports, {
+  attackScaleFromWarmth: () => attackScaleFromWarmth,
+  brightnessFromLuminance: () => brightnessFromLuminance,
+  chromaOf: () => chromaOf,
+  modeFromPalette: () => modeFromPalette,
+  pagePalette: () => pagePalette,
+  parseCssColor: () => parseCssColor,
+  rgbToHsl: () => rgbToHsl,
+  richnessFromSaturation: () => richnessFromSaturation,
+  roomToneScaleFromWarmth: () => roomToneScaleFromWarmth,
+  subBonusFromWarmth: () => subBonusFromWarmth,
+  tempoScaleFromWarmth: () => tempoScaleFromWarmth,
+  velocityFromLuminance: () => velocityFromLuminance,
+  warmthFromHue: () => warmthFromHue
+});
+function parseCssColor(css) {
+  const m = css.trim().match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*(?:,\s*(\d*(?:\.\d+)?)\s*)?\)$/);
+  if (!m) return null;
+  return {
+    r: clamp(parseFloat(m[1]) / 255, 0, 1),
+    g: clamp(parseFloat(m[2]) / 255, 0, 1),
+    b: clamp(parseFloat(m[3]) / 255, 0, 1),
+    a: m[4] === void 0 ? 1 : clamp(parseFloat(m[4]), 0, 1)
+  };
+}
+function rgbToHsl({ r, g, b }) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d < 1e-6) return { h: 0, s: 0, l };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h;
+  if (max === r) h = (g - b) / d % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return { h, s: clamp(s, 0, 1), l };
+}
+function warmthFromHue(h, s) {
+  const raw = 0.5 + 0.5 * Math.cos((h - 30) * Math.PI / 180);
+  return lerp(0.5, raw, clamp(s * 2, 0, 1));
+}
+function chromaOf(rgb) {
+  if (!rgb || rgb.a < 0.05) return { warmth: 0.5, saturation: 0, luminance: 0.5 };
+  const { h, s, l } = rgbToHsl(rgb);
+  return { warmth: warmthFromHue(h, s), saturation: s, luminance: l };
+}
+var brightnessFromLuminance = (l) => lerp(0.78, 1.22, clamp(l, 0, 1));
+var velocityFromLuminance = (l) => lerp(0.92, 1.06, clamp(l, 0, 1));
+var attackScaleFromWarmth = (w) => lerp(1.18, 0.82, clamp(w, 0, 1));
+var subBonusFromWarmth = (w) => 0.08 * clamp(w, 0, 1);
+var richnessFromSaturation = (s) => 0.35 * clamp(s, 0, 1);
+function modeFromPalette(pal) {
+  if (pal.warmth >= 0.55) return pal.luminance >= 0.5 ? "lydian" : "mixolydian";
+  if (pal.warmth <= 0.45) return pal.luminance >= 0.5 ? "dorian" : "pentMinor";
+  return null;
+}
+function pagePalette(bg, text) {
+  return {
+    warmth: bg.warmth * 0.7 + text.warmth * 0.3,
+    saturation: bg.saturation * 0.7 + text.saturation * 0.3,
+    luminance: bg.luminance * 0.7 + text.luminance * 0.3
+  };
+}
+var roomToneScaleFromWarmth = (w) => lerp(0.85, 1.25, clamp(w, 0, 1));
+var tempoScaleFromWarmth = (w) => lerp(0.94, 1.06, clamp(w, 0, 1));
+
+// src/math/pulse.ts
+var pulse_exports = {};
+__export(pulse_exports, {
+  DUCK_RECOVERY_MS: () => DUCK_RECOVERY_MS,
+  ECHO_MIN_AHEAD_S: () => ECHO_MIN_AHEAD_S,
+  ECHO_TRANSPOSE: () => ECHO_TRANSPOSE,
+  ECHO_VELOCITY_SCALE: () => ECHO_VELOCITY_SCALE,
+  PHRASE_MAX_NOTES: () => PHRASE_MAX_NOTES,
+  PHRASE_MIN_NOTES: () => PHRASE_MIN_NOTES,
+  PHRASE_PROBABILITY: () => PHRASE_PROBABILITY,
+  decayCount: () => decayCount,
+  duckFactor: () => duckFactor,
+  echoGridS: () => echoGridS,
+  nextGridOffset: () => nextGridOffset,
+  phraseWindow: () => phraseWindow,
+  readingOrderKey: () => readingOrderKey,
+  secondsPerBeat: () => secondsPerBeat,
+  strumStepS: () => strumStepS,
+  tempoFromPage: () => tempoFromPage
+});
+function tempoFromPage(elementCount, warmthScale) {
+  const base = lerp(66, 104, clamp(elementCount / 120, 0, 1));
+  return Math.round(clamp(base * warmthScale, 56, 116));
+}
+var secondsPerBeat = (bpm) => 60 / Math.max(1, bpm);
+function nextGridOffset(phaseS, gridS, minAheadS) {
+  if (gridS <= 0) return minAheadS;
+  let offset = gridS - (phaseS % gridS + gridS) % gridS;
+  while (offset < minAheadS) offset += gridS;
+  return offset;
+}
+var strumStepS = (bpm) => secondsPerBeat(bpm) / 8;
+var ECHO_TRANSPOSE = 12;
+var ECHO_VELOCITY_SCALE = 0.22;
+var ECHO_MIN_AHEAD_S = 0.08;
+var echoGridS = (bpm) => secondsPerBeat(bpm) / 2;
+var DUCK_RECOVERY_MS = 2e3;
+var decayCount = (count, dtMs) => Math.max(0, count - dtMs / DUCK_RECOVERY_MS);
+var duckFactor = (count) => Math.max(0.4, Math.pow(0.85, Math.max(0, count)));
+var PHRASE_PROBABILITY = 0.55;
+var PHRASE_MIN_NOTES = 2;
+var PHRASE_MAX_NOTES = 4;
+var readingOrderKey = (top, left) => Math.round(top / 80) * 1e5 + clamp(left, 0, 99999);
+function phraseWindow(n, len, progress) {
+  return Math.round(clamp(progress, 0, 1) * Math.max(0, n - len));
+}
+
 // src/themes/index.ts
 var aurora = {
   name: "aurora",
@@ -852,9 +970,9 @@ var Room = class {
     this.noiseFilter = null;
     this.noiseGain = null;
     this.rushGain = null;
-    this.sparkle = null;
     this.resizeTimer = null;
     this.mutedNow = false;
+    this.toneScale = 1;
     this.limiter = new Tone6.Limiter(-1).toDestination();
     this.master = new Tone6.Volume(opts.volumeDb).connect(this.limiter);
     this.highShelf = new Tone6.Filter({ type: "highshelf", frequency: 4e3, gain: brillianceDb(factors.brilliance) }).connect(this.master);
@@ -887,17 +1005,18 @@ var Room = class {
       try {
         this.reverb.decay = decay;
         this.wetGain?.gain.rampTo(wet, 0.3);
-        this.noiseFilter?.frequency.rampTo(ambienceCutoffFromViewport(vw), 0.5);
+        this.noiseFilter?.frequency.rampTo(ambienceCutoffFromViewport(vw) * this.toneScale, 0.5);
       } catch (err) {
         console.warn("[sonarium] room resize failed", err);
       }
     }, 400);
   }
-  /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
-  startAmbience(vw, level, pickSparkle) {
+  /** I13 — room tone (sparkles became the phrase engine, PULSE.md §3). toneScale = CH7 warmth. */
+  startAmbience(vw, level, toneScale = 1) {
     if (level <= 0) return;
+    this.toneScale = toneScale;
     this.noise = new Tone6.Noise("brown");
-    this.noiseFilter = new Tone6.Filter({ frequency: ambienceCutoffFromViewport(vw), type: "lowpass" });
+    this.noiseFilter = new Tone6.Filter({ frequency: ambienceCutoffFromViewport(vw) * toneScale, type: "lowpass" });
     this.noiseGain = new Tone6.Gain(Tone6.dbToGain(-46) * clamp(level / 0.12, 0, 3));
     this.noise.connect(this.noiseFilter);
     this.noiseFilter.connect(this.noiseGain);
@@ -906,13 +1025,6 @@ var Room = class {
     this.noiseFilter.connect(this.rushGain);
     this.rushGain.connect(this.spatialIn);
     this.noise.start();
-    this.sparkle = new Tone6.Loop((time) => {
-      if (Math.random() > 0.4) return;
-      const play = pickSparkle();
-      if (play) Tone6.getDraw().schedule(play, time);
-    }, 2);
-    this.sparkle.start(1);
-    Tone6.getTransport().start();
   }
   /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
   rush(level) {
@@ -933,7 +1045,6 @@ var Room = class {
   }
   dispose() {
     if (this.resizeTimer) clearTimeout(this.resizeTimer);
-    this.sparkle?.dispose();
     this.noise?.dispose();
     this.noiseFilter?.dispose();
     this.noiseGain?.dispose();
@@ -978,8 +1089,8 @@ function deriveMatter(v) {
   };
 }
 var PARTIAL_COUNT = 24;
-function genPartials(edge, elongation) {
-  const p = 1 + 2.6 * (1 - clamp(edge, 0, 1));
+function genPartials(edge, elongation, richness = 0) {
+  const p = Math.max(0.8, 1 + 2.6 * (1 - clamp(edge, 0, 1)) - clamp(richness, 0, 0.5));
   const evenness = lerp(1, 0.12, clamp((elongation - 1) / 4, 0, 1));
   const a = new Float32Array(PARTIAL_COUNT);
   let energy = 0;
@@ -1106,16 +1217,19 @@ function pinnedMidi(spec) {
   if (pc === void 0) return null;
   return (parseInt(m[2], 10) + 1) * 12 + pc;
 }
+function sonicVar(cs, name) {
+  return cs.getPropertyValue(name).trim();
+}
 function profileOf(el, env) {
   const { key, theme, vw, vh } = env;
   const html = el;
   const reasons = {};
+  const cs = getComputedStyle(el);
   const r = el.getBoundingClientRect();
   const rect = { x: r.x, y: r.y, w: Math.max(1, r.width), h: Math.max(1, r.height) };
-  const role = roleOf(el);
+  const role = html.dataset?.sonicRole || sonicVar(cs, "--sonic-role") || roleOf(el);
   const recipe = recipeFor(role, theme);
   reasons.role = `<${el.tagName.toLowerCase()}> reads as "${role}" \u2192 ${recipe.synthKind} voice (theme ${theme.name})`;
-  const cs = getComputedStyle(el);
   const radiusRaw = cs.borderTopLeftRadius;
   const radiusPx = radiusRaw.endsWith("%") ? (parseFloat(radiusRaw) || 0) / 100 * Math.min(rect.w, rect.h) : parseFloat(radiusRaw) || 0;
   const opacity = parseFloat(cs.opacity);
@@ -1137,16 +1251,16 @@ function profileOf(el, env) {
     steps += stepsFromHeadingLevel(level);
   }
   steps += recipe.octaveShift * key.scale.length;
-  const pinned = pinnedMidi(html.dataset?.sonicNote);
+  const pinned = pinnedMidi(html.dataset?.sonicNote ?? sonicVar(cs, "--sonic-note") ?? void 0);
   const midi = pinned ?? degreeToMidi(degree, key, steps);
   reasons.pitch = pinned !== null ? `pinned by data-sonic-note \u2192 ${midiToNoteName(midi)}` : `area ${(rect.w * rect.h / 1e3).toFixed(1)}k px\xB2 (size ${st.toFixed(2)}) + sibling/heading offsets \u2192 ${midiToNoteName(midi)} in ${key.label}`;
-  const wave = html.dataset?.sonicWave || recipe.pinWave || waveFromRoundness(round);
+  const wave = html.dataset?.sonicWave || sonicVar(cs, "--sonic-wave") || recipe.pinWave || waveFromRoundness(round);
   const attack = attackFromRoundness(round);
   reasons.timbre = `roundness ${round.toFixed(2)} (radius ${radiusPx}px) \u2192 ${wave} wave, ${(attack * 1e3).toFixed(0)} ms attack`;
   const durationS = durationFromElongation(rect);
   reasons.duration = `aspect ${(Math.max(rect.w, rect.h) / Math.min(rect.w, rect.h)).toFixed(1)}:1 \u2192 ${durationS.toFixed(2)} s`;
   const dir = sphereFromRect(rect, vw, vh);
-  const extentOverride = parseFloat(html.dataset?.sonicExtent ?? "");
+  const extentOverride = parseFloat(html.dataset?.sonicExtent ?? sonicVar(cs, "--sonic-extent"));
   const sphere = {
     azimuth: dir.azimuth,
     elevation: dir.elevation,
@@ -1154,10 +1268,16 @@ function profileOf(el, env) {
     directivity: directivityFromRoundness(round)
   };
   reasons.sphere = `az ${(sphere.azimuth / DEG).toFixed(0)}\xB0, el ${(sphere.elevation / DEG).toFixed(0)}\xB0, extent ${sphere.extent.toFixed(2)} (size wraps the listener), directivity ${sphere.directivity.toFixed(2)} (sharp beams, round radiates)`;
-  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh) * directivityFilterScale(sphere.directivity);
-  reasons.filter = `depth ${depth} + vertical position + directivity \u2192 low-pass ${Math.round(filterHz)} Hz`;
-  let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth) * (isNaN(opacity) ? 1 : opacity);
-  if (isQuiet(el)) velocityScale *= 0.4;
+  const chroma = elementChroma(el, cs, role);
+  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh) * directivityFilterScale(sphere.directivity) * brightnessFromLuminance(chroma.luminance);
+  reasons.filter = `depth ${depth} + vertical position + directivity + luminance \u2192 low-pass ${Math.round(filterHz)} Hz`;
+  let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth) * (isNaN(opacity) ? 1 : opacity) * velocityFromLuminance(chroma.luminance);
+  const sonicMode = sonicVar(cs, "--sonic");
+  if (isQuiet(el) || sonicMode === "quiet") velocityScale *= 0.4;
+  if (sonicMode === "off") {
+    velocityScale = 0;
+    reasons.silenced = "--sonic: off (aural stylesheet)";
+  }
   velocityScale = clamp(velocityScale, 0, 1.5);
   const elongation = Math.max(rect.w, rect.h) / Math.max(1, Math.min(rect.w, rect.h));
   const matter = deriveMatter({
@@ -1170,18 +1290,24 @@ function profileOf(el, env) {
     isMedia: role === "media",
     backdropBlurPx: parseBackdropBlur(cs)
   });
+  const env0 = envelopeWeave(matter.edge, matter.mass);
+  const sub0 = subShimmer(matter.mass);
   const voice = {
     matter,
-    partials: Array.from(genPartials(matter.edge, elongation)),
+    partials: Array.from(genPartials(matter.edge, elongation, richnessFromSaturation(chroma.saturation))),
     transient: transient(matter.edge),
     breath: breath(matter.texture),
-    subShimmer: subShimmer(matter.mass),
+    subShimmer: {
+      interval: sub0.interval,
+      level: sub0.level + (sub0.interval < 0 ? subBonusFromWarmth(chroma.warmth) : 0)
+    },
     glideS: glideS(matter.edge),
     jitterCents: detuneJitterCents(matter.texture),
-    envelope: envelopeWeave(matter.edge, matter.mass),
+    envelope: { ...env0, attackS: env0.attackS * attackScaleFromWarmth(chroma.warmth) },
     filter: filterWeave(matter.edge),
     reverb: reverbWeave(matter.edge, matter.mass, matter.texture)
   };
+  reasons.chroma = `warmth ${chroma.warmth.toFixed(2)} \xB7 sat ${chroma.saturation.toFixed(2)} \xB7 lum ${chroma.luminance.toFixed(2)} \u2192 ${chroma.warmth > 0.6 ? "eager onset, full body" : chroma.warmth < 0.4 ? "cool, unhurried onset" : "neutral temperament"}${chroma.saturation > 0.5 ? ", vivid spectrum" : ""}`;
   reasons.matter = `edge ${matter.edge.toFixed(2)} \xB7 mass ${matter.mass.toFixed(2)} \xB7 texture ${matter.texture.toFixed(2)} \xB7 air ${matter.air.toFixed(2)} \u2192 ${voice.transient.level > 0.1 ? "clicky" : "soft"}, ${voice.breath.level > 0.05 ? "breathy" : "clean"}, ${voice.subShimmer.interval < 0 ? "chest sub" : "sparkle +8va"}, ${voice.reverb.bloom > 0.5 ? "blooms into the room" : "dry strike"}`;
   const reverbSend = clamp(
     (0.18 + sendFromShadowBlur(shadowBlur) + 0.05 * Math.min(depth, 10) * 0.5) * voice.reverb.sendScale,
@@ -1207,8 +1333,23 @@ function profileOf(el, env) {
     synthKind: recipe.synthKind,
     octaveShift: recipe.octaveShift,
     voice,
+    chroma,
     reasons
   };
+}
+function elementChroma(el, cs, role) {
+  if (role === "text" || role === "heading" || role === "link") {
+    return chromaOf(parseCssColor(cs.color));
+  }
+  let probe = el;
+  let style = cs;
+  for (let hops = 0; probe && hops < 6; hops++) {
+    const rgb = parseCssColor((style ?? getComputedStyle(probe)).backgroundColor);
+    if (rgb && rgb.a >= 0.05) return chromaOf(rgb);
+    probe = probe.parentElement;
+    style = void 0;
+  }
+  return chromaOf(parseCssColor(getComputedStyle(document.documentElement).backgroundColor));
 }
 function parseBackdropBlur(cs) {
   const bf = cs.backdropFilter || cs.webkitBackdropFilter || "";
@@ -1816,6 +1957,8 @@ var Engine = class {
     this.room = null;
     this.rig = null;
     this.backend = null;
+    this.phraseLoop = null;
+    this.activity = /* @__PURE__ */ new WeakMap();
     this.gate = null;
     this.detachers = [];
     this.listeners = /* @__PURE__ */ new Map();
@@ -1827,7 +1970,19 @@ var Engine = class {
       throw new Error("[sonarium] requires a browser environment (create() in the client only)");
     }
     const reduced = (userOpts.respectReducedMotion ?? true) && typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const key = (userOpts.key && userOpts.key !== "auto" ? parseKey(userOpts.key) : null) ?? siteKey(location.hostname);
+    const rootStyle = getComputedStyle(document.documentElement);
+    const bodyStyle = getComputedStyle(document.body);
+    this.palette = pagePalette(
+      chromaOf(parseCssColor(bodyStyle.backgroundColor)),
+      chromaOf(parseCssColor(bodyStyle.color))
+    );
+    const cssKey = rootStyle.getPropertyValue("--sonic-key").trim();
+    let key = (userOpts.key && userOpts.key !== "auto" ? parseKey(userOpts.key) : null) ?? (cssKey ? parseKey(cssKey) : null);
+    if (!key) {
+      const hashed = siteKey(location.hostname);
+      const mode = modeFromPalette(this.palette);
+      key = mode ? { ...hashed, scaleName: mode, scale: SCALES[mode], label: `${hashed.label.split(" ")[0]} ${mode}` } : hashed;
+    }
     this.opts = {
       root: userOpts.root ?? document.body,
       theme: resolveTheme(userOpts.theme),
@@ -1854,6 +2009,8 @@ var Engine = class {
     this.muted = isMutedPersisted();
     this.scanner = new Scanner(this.env, { onAppear: (el) => this.whisper(el) });
     this.scanner.scan();
+    const cssTempo = parseFloat(rootStyle.getPropertyValue("--sonic-tempo"));
+    this.tempo = cssTempo > 0 ? clamp(Math.round(cssTempo), 30, 200) : tempoFromPage(this.scanner.registry.size, tempoScaleFromWarmth(this.palette.warmth));
     this.arm();
   }
   // ---------------------------------------------------------------- lifecycle
@@ -1908,9 +2065,29 @@ var Engine = class {
     this.bucketTimer = setInterval(() => {
       this.appearBucket = Math.min(6, this.appearBucket + 6);
     }, 1e3);
-    this.room?.startAmbience(this.env.vw, this.opts.ambient, () => this.pickSparkle());
+    Tone9.getTransport().bpm.value = this.tempo;
+    Tone9.getTransport().start();
+    this.room?.startAmbience(this.env.vw, this.opts.ambient, roomToneScaleFromWarmth(this.palette.warmth));
+    if (this.opts.ambient > 0) {
+      this.phraseLoop = new Tone9.Loop((time) => this.playPhrase(time), "1m");
+      this.phraseLoop.start("1m");
+    }
     this.playIntroMotif();
     this.emit("start");
+  }
+  /** PULSE.md §3 — the ambience reads the layout as a score; scroll moves the playhead. */
+  playPhrase(time) {
+    if (this.state !== "running" || this.muted || document.hidden) return;
+    if (time === void 0 || !Number.isFinite(time)) time = Tone9.now();
+    if (Math.random() > PHRASE_PROBABILITY) return;
+    const pool = this.scanner.visibleElements().map((el) => ({ el, p: this.scanner.profileFor(el) })).filter((x) => !!x.p && x.p.role !== "container" && x.p.velocityScale > 0.01).sort((a, b) => readingOrderKey(a.p.rect.y, a.p.rect.x) - readingOrderKey(b.p.rect.y, b.p.rect.x));
+    if (pool.length < PHRASE_MIN_NOTES) return;
+    const len = Math.min(pool.length, PHRASE_MIN_NOTES + Math.floor(Math.random() * (PHRASE_MAX_NOTES - PHRASE_MIN_NOTES + 1)));
+    const scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+    const start2 = phraseWindow(pool.length, len, window.scrollY / scrollable);
+    const step = secondsPerBeat(this.tempo) / 2;
+    const level = 0.07 * (this.opts.ambient / 0.12);
+    pool.slice(start2, start2 + len).forEach(({ el }, i) => this.excite(el, level, "phrase", time + i * step));
   }
   /**
    * SPATIAL.md §6 — ambisonic field by default; if its construction throws on an exotic
@@ -1967,6 +2144,7 @@ var Engine = class {
     this.state = "disposed";
     this.removeUnlockListeners();
     if (this.bucketTimer) clearInterval(this.bucketTimer);
+    this.phraseLoop?.dispose();
     for (const detach of this.detachers.splice(0)) {
       try {
         detach();
@@ -1991,9 +2169,18 @@ var Engine = class {
    */
   excite(el, velocity, articulation, when, transpose = 0) {
     if (this.state !== "running" || this.muted || !this.pool) return;
+    if (when !== void 0 && !Number.isFinite(when)) when = void 0;
     const target = this.scanner.resolve(el) ?? el;
     let profile = this.scanner.profileFor(target);
     if (!profile) return;
+    if (articulation !== "motif" && articulation !== "echo" && articulation !== "phrase" && articulation !== "whisper") {
+      const now6 = performance.now();
+      const a = this.activity.get(target) ?? { c: 0, t: now6 };
+      a.c = decayCount(a.c, now6 - a.t) + 1;
+      a.t = now6;
+      this.activity.set(target, a);
+      velocity *= duckFactor(a.c - 1);
+    }
     if (transpose !== 0) {
       profile = { ...profile, midi: profile.midi + transpose, freqHz: profile.freqHz * Math.pow(2, transpose / 12) };
     }
@@ -2009,6 +2196,10 @@ var Engine = class {
     } else {
       this.pool.trigger(profile, velocity * this.opts.velocityFactor, when);
     }
+    if (articulation === "hit" && velocity >= 0.55) {
+      const offset = nextGridOffset(Tone9.getTransport().seconds, echoGridS(this.tempo), ECHO_MIN_AHEAD_S);
+      this.excite(target, velocity * ECHO_VELOCITY_SCALE, "echo", Tone9.now() + offset, ECHO_TRANSPOSE);
+    }
     this.emit("trigger", { el: target, profile, velocity, articulation });
   }
   /** I3/I11 — strum a set of elements left→right. */
@@ -2016,18 +2207,13 @@ var Engine = class {
     if (this.state !== "running" || !this.pool) return;
     const sorted = els.map((el) => ({ el, p: this.scanner.profileFor(el) })).filter((x) => !!x.p).sort((a, b) => a.p.rect.x - b.p.rect.x).slice(0, 6);
     const t0 = Tone9.now();
-    sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * 0.06));
+    const step = strumStepS(this.tempo);
+    sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * step));
   }
   whisper(el) {
     if (this.appearBucket <= 0) return;
     this.appearBucket--;
     this.excite(el, 0.12, "whisper");
-  }
-  pickSparkle() {
-    const visible = this.scanner?.visibleElements() ?? [];
-    if (!visible.length) return null;
-    const el = visible[Math.floor(Math.random() * visible.length)];
-    return () => this.excite(el, 0.07 * (this.opts.ambient / 0.12), "whisper");
   }
   /** I12 — the page introduces itself: its largest landmarks, in DOM order, in the site key. */
   playIntroMotif() {
@@ -2040,7 +2226,8 @@ var Engine = class {
     const byArea = candidates.map((el) => ({ el, area: el.getBoundingClientRect().width * el.getBoundingClientRect().height })).sort((a, b) => b.area - a.area).slice(0, 5).map((x) => x.el);
     const inDomOrder = candidates.filter((el) => byArea.includes(el));
     const t0 = Tone9.now() + 0.1;
-    inDomOrder.forEach((el, i) => this.excite(el, 0.3, "motif", t0 + i * 0.09));
+    const step = secondsPerBeat(this.tempo) / 4;
+    inDomOrder.forEach((el, i) => this.excite(el, 0.3, "motif", t0 + i * step));
   }
   // ---------------------------------------------------------------- introspection
   /** Invariant #6 — explain why an element sounds the way it does. Works before start(). */
@@ -2076,7 +2263,7 @@ var Engine = class {
 };
 
 // src/index.ts
-var version = "0.3.0";
+var version = "0.4.0";
 function create(options = {}) {
   return new Engine(options);
 }
@@ -2113,6 +2300,7 @@ export {
   SCALES,
   THEMES,
   applyMat3,
+  chroma_exports as chroma,
   create,
   decodeGains,
   decodeMatrix,
@@ -2124,6 +2312,7 @@ export {
   midiToFreq,
   midiToNoteName,
   parseKey,
+  pulse_exports as pulse,
   rotationMatrix,
   siteKey,
   sphere_exports as sphereMapping,

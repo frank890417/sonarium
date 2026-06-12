@@ -13,7 +13,9 @@ export type Role =
 
 export type SynthKind = 'matter' | 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise'
 
-export type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif'
+export type Articulation =
+  | 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif'
+  | 'echo' | 'phrase'
 
 export interface Rect {
   x: number
@@ -80,6 +82,8 @@ export interface SonicProfile {
   /** The full Matter weave (MATTER.md) — always computed; the 'matter' voice consumes all of
    *  it, other synth kinds consume the reverb/filter threads. */
   voice: MatterVoiceParams
+  /** The Chroma weave (CHROMA.md): the element's color as mood. */
+  chroma: { warmth: number; saturation: number; luminance: number }
   /** Human-readable provenance of every parameter — describe() truth (PLAN.md Invariant #6). */
   reasons: Record<string, string>
 }

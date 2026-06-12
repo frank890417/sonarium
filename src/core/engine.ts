@@ -3,8 +3,17 @@
  * Lifecycle: idle → armed → running ⇄ muted → disposed (§3).
  */
 import * as Tone from 'tone'
-import { parseKey, siteKey, type SiteKey } from '../math/scales'
+import { SCALES, parseKey, siteKey, type SiteKey } from '../math/scales'
 import { clamp } from '../math/util'
+import {
+  chromaOf, modeFromPalette, pagePalette, parseCssColor, roomToneScaleFromWarmth,
+  tempoScaleFromWarmth, type Chroma,
+} from '../math/chroma'
+import {
+  ECHO_MIN_AHEAD_S, ECHO_TRANSPOSE, ECHO_VELOCITY_SCALE, PHRASE_MAX_NOTES, PHRASE_MIN_NOTES,
+  PHRASE_PROBABILITY, decayCount, duckFactor, echoGridS, nextGridOffset, phraseWindow,
+  readingOrderKey, secondsPerBeat, strumStepS, tempoFromPage,
+} from '../math/pulse'
 import type { Articulation, PerceptualFactors, SonariumOptions, SonicProfile, SonariumEvent, Theme, TriggerDetail } from '../types'
 import { resolveTheme } from '../themes/index'
 import { mountGate, isMutedPersisted, persistMuted, type GateHandle } from '../ui/gate'
@@ -51,6 +60,11 @@ export class Engine {
   rig: ListenerRig | FieldRig | null = null
   backend: SpatialBackend | null = null
   factors: PerceptualFactors
+  /** The page's mood (CHROMA.md §3) and pulse (PULSE.md §1), fixed at create(). */
+  readonly palette: Chroma
+  readonly tempo: number
+  private phraseLoop: Tone.Loop | null = null
+  private activity = new WeakMap<Element, { c: number; t: number }>()
 
   private gate: GateHandle | null = null
   private env: ProfileEnv
@@ -68,8 +82,23 @@ export class Engine {
       && typeof matchMedia === 'function'
       && matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    const key = (userOpts.key && userOpts.key !== 'auto' ? parseKey(userOpts.key) : null)
-      ?? siteKey(location.hostname)
+    // CHROMA.md §3 — the palette chooses the mode; the hostname keeps the root (identity).
+    const rootStyle = getComputedStyle(document.documentElement)
+    const bodyStyle = getComputedStyle(document.body)
+    this.palette = pagePalette(
+      chromaOf(parseCssColor(bodyStyle.backgroundColor)),
+      chromaOf(parseCssColor(bodyStyle.color)),
+    )
+    const cssKey = rootStyle.getPropertyValue('--sonic-key').trim()
+    let key = (userOpts.key && userOpts.key !== 'auto' ? parseKey(userOpts.key) : null)
+      ?? (cssKey ? parseKey(cssKey) : null)
+    if (!key) {
+      const hashed = siteKey(location.hostname)
+      const mode = modeFromPalette(this.palette)
+      key = mode
+        ? { ...hashed, scaleName: mode, scale: SCALES[mode] as readonly number[], label: `${hashed.label.split(' ')[0]} ${mode}` }
+        : hashed
+    }
 
     this.opts = {
       root: userOpts.root ?? document.body,
@@ -101,6 +130,12 @@ export class Engine {
     // L1 perception is always on: the page is readable (describe()) before it is audible.
     this.scanner = new Scanner(this.env, { onAppear: (el) => this.whisper(el) })
     this.scanner.scan()
+
+    // PULSE.md §1 — the layout sets the pace (overridable via --sonic-tempo).
+    const cssTempo = parseFloat(rootStyle.getPropertyValue('--sonic-tempo'))
+    this.tempo = cssTempo > 0
+      ? clamp(Math.round(cssTempo), 30, 200)
+      : tempoFromPage(this.scanner.registry.size, tempoScaleFromWarmth(this.palette.warmth))
 
     this.arm()
   }
@@ -169,9 +204,34 @@ export class Engine {
 
     this.bucketTimer = setInterval(() => { this.appearBucket = Math.min(6, this.appearBucket + 6) }, 1000)
 
-    this.room?.startAmbience(this.env.vw, this.opts.ambient, () => this.pickSparkle())
+    // PULSE.md — the page's clock drives ambience, echoes and phrases.
+    Tone.getTransport().bpm.value = this.tempo
+    Tone.getTransport().start()
+    this.room?.startAmbience(this.env.vw, this.opts.ambient, roomToneScaleFromWarmth(this.palette.warmth))
+    if (this.opts.ambient > 0) {
+      this.phraseLoop = new Tone.Loop((time) => this.playPhrase(time), '1m')
+      this.phraseLoop.start('1m')
+    }
     this.playIntroMotif()
     this.emit('start')
+  }
+
+  /** PULSE.md §3 — the ambience reads the layout as a score; scroll moves the playhead. */
+  private playPhrase(time?: number): void {
+    if (this.state !== 'running' || this.muted || document.hidden) return
+    if (time === undefined || !Number.isFinite(time)) time = Tone.now()
+    if (Math.random() > PHRASE_PROBABILITY) return
+    const pool = this.scanner.visibleElements()
+      .map((el) => ({ el, p: this.scanner.profileFor(el) }))
+      .filter((x): x is { el: Element; p: SonicProfile } => !!x.p && x.p.role !== 'container' && x.p.velocityScale > 0.01)
+      .sort((a, b) => readingOrderKey(a.p.rect.y, a.p.rect.x) - readingOrderKey(b.p.rect.y, b.p.rect.x))
+    if (pool.length < PHRASE_MIN_NOTES) return
+    const len = Math.min(pool.length, PHRASE_MIN_NOTES + Math.floor(Math.random() * (PHRASE_MAX_NOTES - PHRASE_MIN_NOTES + 1)))
+    const scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight)
+    const start = phraseWindow(pool.length, len, window.scrollY / scrollable)
+    const step = secondsPerBeat(this.tempo) / 2
+    const level = 0.07 * (this.opts.ambient / 0.12)
+    pool.slice(start, start + len).forEach(({ el }, i) => this.excite(el, level, 'phrase', time + i * step))
   }
 
   /**
@@ -234,6 +294,7 @@ export class Engine {
     this.state = 'disposed'
     this.removeUnlockListeners()
     if (this.bucketTimer) clearInterval(this.bucketTimer)
+    this.phraseLoop?.dispose()
     for (const detach of this.detachers.splice(0)) {
       try { detach() } catch { /* already gone */ }
     }
@@ -257,9 +318,20 @@ export class Engine {
    */
   excite(el: Element, velocity: number, articulation: Articulation, when?: number, transpose = 0): void {
     if (this.state !== 'running' || this.muted || !this.pool) return
+    if (when !== undefined && !Number.isFinite(when)) when = undefined // NaN must never reach a ramp
     const target = this.scanner.resolve(el) ?? el
     let profile = this.scanner.profileFor(target)
     if (!profile) return
+
+    // PULSE.md §4 — the calm system: repeated sounds recede (motifs/echoes/phrases exempt).
+    if (articulation !== 'motif' && articulation !== 'echo' && articulation !== 'phrase' && articulation !== 'whisper') {
+      const now = performance.now()
+      const a = this.activity.get(target) ?? { c: 0, t: now }
+      a.c = decayCount(a.c, now - a.t) + 1
+      a.t = now
+      this.activity.set(target, a)
+      velocity *= duckFactor(a.c - 1)
+    }
     if (transpose !== 0) {
       profile = { ...profile, midi: profile.midi + transpose, freqHz: profile.freqHz * Math.pow(2, transpose / 12) }
     }
@@ -276,6 +348,14 @@ export class Engine {
     } else {
       this.pool.trigger(profile, velocity * this.opts.velocityFactor, when)
     }
+
+    // PULSE.md §2 — the room answers strong hits on the next 8th, one octave up, quiet.
+    // The primary hit above was NOT delayed (the latency invariant, §0).
+    if (articulation === 'hit' && velocity >= 0.55) {
+      const offset = nextGridOffset(Tone.getTransport().seconds, echoGridS(this.tempo), ECHO_MIN_AHEAD_S)
+      this.excite(target, velocity * ECHO_VELOCITY_SCALE, 'echo', Tone.now() + offset, ECHO_TRANSPOSE)
+    }
+
     this.emit('trigger', { el: target, profile, velocity, articulation } satisfies TriggerDetail)
   }
 
@@ -287,21 +367,16 @@ export class Engine {
       .filter((x): x is { el: Element; p: SonicProfile } => !!x.p)
       .sort((a, b) => a.p.rect.x - b.p.rect.x)
       .slice(0, 6)
+    // metered: 32nd-note spacing at the page's tempo (PULSE.md §3)
     const t0 = Tone.now()
-    sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * 0.06))
+    const step = strumStepS(this.tempo)
+    sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * step))
   }
 
   private whisper(el: Element): void {
     if (this.appearBucket <= 0) return
     this.appearBucket--
     this.excite(el, 0.12, 'whisper')
-  }
-
-  private pickSparkle(): (() => void) | null {
-    const visible = this.scanner?.visibleElements() ?? []
-    if (!visible.length) return null
-    const el = visible[Math.floor(Math.random() * visible.length)] as Element
-    return () => this.excite(el, 0.07 * (this.opts.ambient / 0.12), 'whisper')
   }
 
   /** I12 — the page introduces itself: its largest landmarks, in DOM order, in the site key. */
@@ -319,7 +394,8 @@ export class Engine {
       .map((x) => x.el)
     const inDomOrder = candidates.filter((el) => byArea.includes(el))
     const t0 = Tone.now() + 0.1
-    inDomOrder.forEach((el, i) => this.excite(el, 0.3, 'motif', t0 + i * 0.09))
+    const step = secondsPerBeat(this.tempo) / 4 // the motif walks 16ths at the page's tempo
+    inDomOrder.forEach((el, i) => this.excite(el, 0.3, 'motif', t0 + i * step))
   }
 
   // ---------------------------------------------------------------- introspection

@@ -103,9 +103,12 @@ the recipe (G7–G11 override oscillator/envelope where the recipe allows).
 - `data-sonic-note="E4"` — pin pitch (still placed/spatialized normally).
 - `data-sonic-wave="square|sawtooth|triangle|sine"` — pin waveform.
 - `data-sonic-role="button|…|text"` — pin role.
-- JS option `key`, `theme`, `listener`, `ambient`, `volume`, `panning`, `maxVoices`, `reverb`.
-- P1 (specified, not yet implemented): CSS custom properties `--sonic`, `--sonic-note`,
-  `--sonic-wave` read via `getComputedStyle` — the de-facto aural stylesheet.
+- JS option `key`, `theme`, `listener`, `ambient`, `volume`, `panning`, `spatial`, `perceptual`,
+  `maxVoices`, `reverb`.
+- **CSS custom properties (v0.4 — the aural stylesheet, [CHROMA.md](./CHROMA.md) §4):**
+  `--sonic` (`off|quiet`), `--sonic-note`, `--sonic-wave`, `--sonic-role`, `--sonic-extent`
+  per element (inheriting!), `--sonic-key` and `--sonic-tempo` at the root.
+  Priority: `data-sonic-*` attribute > custom property > inference.
 
 ## 5.5 Sphere mappings (v0.2)
 

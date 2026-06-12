@@ -33,9 +33,9 @@ export class Room {
   private noiseFilter: Tone.Filter | null = null
   private noiseGain: Tone.Gain | null = null
   private rushGain: Tone.Gain | null = null
-  private sparkle: Tone.Loop | null = null
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private mutedNow = false
+  private toneScale = 1
 
   constructor(private opts: RoomOptions, vw: number, factors: PerceptualFactors) {
     this.limiter = new Tone.Limiter(-1).toDestination()
@@ -74,18 +74,19 @@ export class Room {
       try {
         this.reverb.decay = decay
         this.wetGain?.gain.rampTo(wet, 0.3)
-        this.noiseFilter?.frequency.rampTo(ambienceCutoffFromViewport(vw), 0.5)
+        this.noiseFilter?.frequency.rampTo(ambienceCutoffFromViewport(vw) * this.toneScale, 0.5)
       } catch (err) {
         console.warn('[sonarium] room resize failed', err)
       }
     }, 400)
   }
 
-  /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
-  startAmbience(vw: number, level: number, pickSparkle: () => (() => void) | null): void {
+  /** I13 — room tone (sparkles became the phrase engine, PULSE.md §3). toneScale = CH7 warmth. */
+  startAmbience(vw: number, level: number, toneScale = 1): void {
     if (level <= 0) return
+    this.toneScale = toneScale
     this.noise = new Tone.Noise('brown')
-    this.noiseFilter = new Tone.Filter({ frequency: ambienceCutoffFromViewport(vw), type: 'lowpass' })
+    this.noiseFilter = new Tone.Filter({ frequency: ambienceCutoffFromViewport(vw) * toneScale, type: 'lowpass' })
     this.noiseGain = new Tone.Gain(Tone.dbToGain(-46) * clamp(level / 0.12, 0, 3))
     this.noise.connect(this.noiseFilter)
     this.noiseFilter.connect(this.noiseGain)
@@ -95,14 +96,6 @@ export class Room {
     this.noiseFilter.connect(this.rushGain)
     this.rushGain.connect(this.spatialIn)
     this.noise.start()
-
-    this.sparkle = new Tone.Loop((time) => {
-      if (Math.random() > 0.4) return
-      const play = pickSparkle()
-      if (play) Tone.getDraw().schedule(play, time)
-    }, 2)
-    this.sparkle.start(1)
-    Tone.getTransport().start()
   }
 
   /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
@@ -127,7 +120,6 @@ export class Room {
 
   dispose(): void {
     if (this.resizeTimer) clearTimeout(this.resizeTimer)
-    this.sparkle?.dispose()
     this.noise?.dispose()
     this.noiseFilter?.dispose()
     this.noiseGain?.dispose()

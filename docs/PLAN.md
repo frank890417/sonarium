@@ -218,32 +218,42 @@ From mapping-table to **material model** — see [MATTER.md](./MATTER.md):
   send *bloom* over the note, MASS/AIR send scaling.
 - Feelability acceptance: every weave must pass a blindfold A/B (MATTER.md §4).
 
-### P3 — v0.4 "Chromatic" (next 1–2 sessions)
-- Color → brightness/warmth mapping (parse computed `background-color`/`color`, map luminance →
-  filter cutoff, hue warmth → detune/chorus). Thesis: warm = energetic.
-- Typography mapping (font-size/weight → register/velocity; `font-family` serif/sans → ?
-  research question RQ5).
-- `--sonic-*` CSS custom property support (true "aural stylesheet" authoring).
-- Drag → continuous glissando voice (theremin model); scroll velocity → air-noise swell.
-- Adaptive ducking: repeated identical triggers decay in velocity (annoyance control, RQ3).
+### P3 — v0.4 "Alive 活" *(user-directed, 2026-06: shipped this session)*
+Color becomes mood, time becomes pulse — see [CHROMA.md](./CHROMA.md) + [PULSE.md](./PULSE.md):
+- **Chroma weave**: per-element warmth/saturation/luminance tint the Matter voice (attack, sub,
+  richness, brightness, velocity); the **page palette chooses the musical mode** (warm-bright
+  lydian … cool-dark pentMinor) while the hostname keeps the root — design becomes tonality.
+- **Pulse**: tempo from layout density × warmth (56–116 bpm); **echoes** answer hits on the next
+  8th (+12, quiet — the primary hit is NEVER delayed: the latency invariant); the ambience
+  becomes a **phrase engine reading the layout in reading order** (scroll moves the playhead);
+  strums and the intro motif are metered.
+- **Aural stylesheet**: `--sonic-*` CSS custom properties (inheriting subtree authoring;
+  `--sonic-key`/`--sonic-tempo` at root) — the standardization seed.
+- **Calm system**: per-element velocity ducking with decay (RQ3 answered in code).
+
+### P4 — v0.5 "Instrumented" (next 1–2 sessions)
 - npm publish (`sonarium`), versioned CDN docs, CHANGELOG discipline.
 - Listening-test page (`/lab`): the thesis mismatch experiment, online, collecting anonymous
-  agreement scores for every mapping (data → MAPPING.md revisions).
+  agreement scores for every mapping and weave (data → canon revisions).
+- Performance pass: voice sleeping (stop idle sources after timeout), Playwright smoke +
+  OfflineAudioContext render assertions, low-end mobile profile.
+- Typography mapping research (font-size/weight → register/velocity; serif/sans → RQ5).
+- Drag → continuous glissando voice (theremin model).
 
-### P4 — v0.5 "Embodied"
+### P5 — v0.6 "Embodied"
 - Gesture grammar: flick/circle/shake-direction vocabulary on mobile; gamepad; Web MIDI in/out.
 - WebXR listener (page becomes a literal room in AR/VR); head-tracked HRTF where available.
 - Multi-user shared rooms (WebRTC data channels): hear other cursors as positioned voices —
   the thesis V7 multiplayer thread.
 - React/Vue/Svelte bindings (`<Sonarium>` provider; hooks for custom triggers).
 
-### P5 — v0.6 "Ecosystem"
+### P6 — v0.7 "Ecosystem"
 - Theme editor (visual mapper: drag curves between CSS properties and synth params — the thesis
   patcher, reborn); theme share/remix registry (JSON packs + gallery).
 - Site-author API for narrative scoring (sections as movements, scroll as timeline).
 - Performance: AudioWorklet ambience, shared HRTF panner pool benchmark.
 
-### P6 — v1.0 "Standard"
+### P7 — v1.0 "Standard"
 - Stability guarantees, full a11y audit with screen-reader users, i18n docs,
   spec write-up proposing `--sonic-*` conventions as a community standard, academic paper
   (CHI/NIME/ICAD) reporting RQ1–RQ5 results.

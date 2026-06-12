@@ -52,11 +52,12 @@ export const PARTIAL_COUNT = 24
 
 /**
  * Continuous spectrum: EDGE sets the rolloff (bright↔pure), elongation sets hollowness
- * (long thin elements = pipes = odd harmonics). Normalized to Σa² = 1 so the whole continuum
- * sits at equal loudness.
+ * (long thin elements = pipes = odd harmonics), richness (CHROMA.md CH5: saturation)
+ * subtracts from the rolloff exponent — vivid color = vivid spectrum. Normalized to Σa² = 1
+ * so the whole continuum sits at equal loudness.
  */
-export function genPartials(edge: number, elongation: number): Float32Array {
-  const p = 1 + 2.6 * (1 - clamp(edge, 0, 1))
+export function genPartials(edge: number, elongation: number, richness = 0): Float32Array {
+  const p = Math.max(0.8, 1 + 2.6 * (1 - clamp(edge, 0, 1)) - clamp(richness, 0, 0.5))
   const evenness = lerp(1, 0.12, clamp((elongation - 1) / 4, 0, 1))
   const a = new Float32Array(PARTIAL_COUNT)
   let energy = 0

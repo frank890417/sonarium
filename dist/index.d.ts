@@ -21,10 +21,77 @@ declare function degreeToMidi(degree: number, key: SiteKey, stepOffset?: number)
 declare const midiToFreq: (m: number) => number;
 declare function midiToNoteName(m: number): string;
 
+interface Rgb {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+}
+interface Hsl {
+    h: number;
+    s: number;
+    l: number;
+}
+interface Chroma {
+    /** 0 cool … 1 warm (desaturated colors regress to 0.5) */
+    warmth: number;
+    saturation: number;
+    luminance: number;
+}
+/** Computed styles emit rgb()/rgba(). Returns null for anything else (treat as no color). */
+declare function parseCssColor(css: string): Rgb | null;
+declare function rgbToHsl({ r, g, b }: Rgb): Hsl;
+/** CHROMA.md §1 — cosine distance of hue from 30° (orange); greys regress to neutral 0.5. */
+declare function warmthFromHue(h: number, s: number): number;
+declare function chromaOf(rgb: Rgb | null): Chroma;
+/** CH1 — dark UI sounds dark. */
+declare const brightnessFromLuminance: (l: number) => number;
+/** CH2 — bright lifts, gently. */
+declare const velocityFromLuminance: (l: number) => number;
+/** CH3 — warm = energetic onset (thesis T5). Multiplier on the woven attack. */
+declare const attackScaleFromWarmth: (w: number) => number;
+/** CH4 — warm = full-bodied: bonus on the sub oscillator level (subs only, not shimmer). */
+declare const subBonusFromWarmth: (w: number) => number;
+/** CH5 — vivid color = vivid spectrum: richness passed to genPartials (rolloff reduction). */
+declare const richnessFromSaturation: (s: number) => number;
+type ModeName = 'lydian' | 'mixolydian' | 'dorian' | 'pentMinor' | null;
+/**
+ * CH6 — the palette chooses the mode; null = neutral, keep the hostname-hashed scale
+ * (identity unchanged). Root pitch-class always stays hostname-hashed (S9).
+ */
+declare function modeFromPalette(pal: Chroma): ModeName;
+/** Visual weight of the page: bg dominates, text tints. */
+declare function pagePalette(bg: Chroma, text: Chroma): Chroma;
+/** CH7 — warm rooms hum warmer. Multiplier on the ambience cutoff. */
+declare const roomToneScaleFromWarmth: (w: number) => number;
+/** CH8 — warm pages run slightly faster (consumed by PULSE.md P2). */
+declare const tempoScaleFromWarmth: (w: number) => number;
+
+type chroma_Chroma = Chroma;
+type chroma_Hsl = Hsl;
+type chroma_ModeName = ModeName;
+type chroma_Rgb = Rgb;
+declare const chroma_attackScaleFromWarmth: typeof attackScaleFromWarmth;
+declare const chroma_brightnessFromLuminance: typeof brightnessFromLuminance;
+declare const chroma_chromaOf: typeof chromaOf;
+declare const chroma_modeFromPalette: typeof modeFromPalette;
+declare const chroma_pagePalette: typeof pagePalette;
+declare const chroma_parseCssColor: typeof parseCssColor;
+declare const chroma_rgbToHsl: typeof rgbToHsl;
+declare const chroma_richnessFromSaturation: typeof richnessFromSaturation;
+declare const chroma_roomToneScaleFromWarmth: typeof roomToneScaleFromWarmth;
+declare const chroma_subBonusFromWarmth: typeof subBonusFromWarmth;
+declare const chroma_tempoScaleFromWarmth: typeof tempoScaleFromWarmth;
+declare const chroma_velocityFromLuminance: typeof velocityFromLuminance;
+declare const chroma_warmthFromHue: typeof warmthFromHue;
+declare namespace chroma {
+  export { type chroma_Chroma as Chroma, type chroma_Hsl as Hsl, type chroma_ModeName as ModeName, type chroma_Rgb as Rgb, chroma_attackScaleFromWarmth as attackScaleFromWarmth, chroma_brightnessFromLuminance as brightnessFromLuminance, chroma_chromaOf as chromaOf, chroma_modeFromPalette as modeFromPalette, chroma_pagePalette as pagePalette, chroma_parseCssColor as parseCssColor, chroma_rgbToHsl as rgbToHsl, chroma_richnessFromSaturation as richnessFromSaturation, chroma_roomToneScaleFromWarmth as roomToneScaleFromWarmth, chroma_subBonusFromWarmth as subBonusFromWarmth, chroma_tempoScaleFromWarmth as tempoScaleFromWarmth, chroma_velocityFromLuminance as velocityFromLuminance, chroma_warmthFromHue as warmthFromHue };
+}
+
 type Wave = 'sine' | 'triangle' | 'sawtooth' | 'square';
 type Role = 'toggle' | 'button' | 'link' | 'input' | 'heading' | 'media' | 'item' | 'container' | 'text';
 type SynthKind = 'matter' | 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise';
-type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif';
+type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif' | 'echo' | 'phrase';
 interface Rect {
     x: number;
     y: number;
@@ -119,6 +186,12 @@ interface SonicProfile {
     /** The full Matter weave (MATTER.md) — always computed; the 'matter' voice consumes all of
      *  it, other synth kinds consume the reverb/filter threads. */
     voice: MatterVoiceParams;
+    /** The Chroma weave (CHROMA.md): the element's color as mood. */
+    chroma: {
+        warmth: number;
+        saturation: number;
+        luminance: number;
+    };
     /** Human-readable provenance of every parameter — describe() truth (PLAN.md Invariant #6). */
     reasons: Record<string, string>;
 }
@@ -232,16 +305,16 @@ declare class Room {
     private noiseFilter;
     private noiseGain;
     private rushGain;
-    private sparkle;
     private resizeTimer;
     private mutedNow;
+    private toneScale;
     constructor(opts: RoomOptions, vw: number, factors: PerceptualFactors);
     setFactors(f: PerceptualFactors): void;
     private roomParams;
     /** Debounced: Tone.Reverb regenerates its impulse response when decay changes. */
     resize(vw: number): void;
-    /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
-    startAmbience(vw: number, level: number, pickSparkle: () => (() => void) | null): void;
+    /** I13 — room tone (sparkles became the phrase engine, PULSE.md §3). toneScale = CH7 warmth. */
+    startAmbience(vw: number, level: number, toneScale?: number): void;
     /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
     rush(level: number): void;
     /** I14 — never sound in a background tab. */
@@ -419,6 +492,11 @@ declare class Engine {
     rig: ListenerRig | FieldRig | null;
     backend: SpatialBackend | null;
     factors: PerceptualFactors;
+    /** The page's mood (CHROMA.md §3) and pulse (PULSE.md §1), fixed at create(). */
+    readonly palette: Chroma;
+    readonly tempo: number;
+    private phraseLoop;
+    private activity;
     private gate;
     private env;
     private detachers;
@@ -431,6 +509,8 @@ declare class Engine {
     private removeUnlockListeners;
     private starting;
     start(): Promise<void>;
+    /** PULSE.md §3 — the ambience reads the layout as a score; scroll moves the playhead. */
+    private playPhrase;
     /**
      * SPATIAL.md §6 — ambisonic field by default; if its construction throws on an exotic
      * browser, fall back to the v0.1 per-voice panner world rather than staying silent.
@@ -452,7 +532,6 @@ declare class Engine {
     /** I3/I11 — strum a set of elements left→right. */
     strum(els: Element[], velocity: number, articulation?: Articulation): void;
     private whisper;
-    private pickSparkle;
     /** I12 — the page introduces itself: its largest landmarks, in DOM order, in the site key. */
     private playIntroMotif;
     /** Invariant #6 — explain why an element sounds the way it does. Works before start(). */
@@ -572,10 +651,11 @@ declare function deriveMatter(v: MatterVisuals): Matter;
 declare const PARTIAL_COUNT = 24;
 /**
  * Continuous spectrum: EDGE sets the rolloff (bright↔pure), elongation sets hollowness
- * (long thin elements = pipes = odd harmonics). Normalized to Σa² = 1 so the whole continuum
- * sits at equal loudness.
+ * (long thin elements = pipes = odd harmonics), richness (CHROMA.md CH5: saturation)
+ * subtracts from the rolloff exponent — vivid color = vivid spectrum. Normalized to Σa² = 1
+ * so the whole continuum sits at equal loudness.
  */
-declare function genPartials(edge: number, elongation: number): Float32Array;
+declare function genPartials(edge: number, elongation: number, richness?: number): Float32Array;
 interface TransientSpec {
     /** noise burst length, seconds */
     lengthS: number;
@@ -657,6 +737,57 @@ declare const matter_subShimmer: typeof subShimmer;
 declare const matter_transient: typeof transient;
 declare namespace matter {
   export { type matter_BreathSpec as BreathSpec, type matter_EnvelopeSpec as EnvelopeSpec, type matter_FilterWeaveSpec as FilterWeaveSpec, type matter_Matter as Matter, type matter_MatterVisuals as MatterVisuals, matter_PARTIAL_COUNT as PARTIAL_COUNT, type matter_ReverbWeaveSpec as ReverbWeaveSpec, type matter_SubShimmerSpec as SubShimmerSpec, type matter_TransientSpec as TransientSpec, matter_airRushGain as airRushGain, matter_breath as breath, matter_deriveMatter as deriveMatter, matter_detuneJitterCents as detuneJitterCents, matter_envelopeWeave as envelopeWeave, matter_filterWeave as filterWeave, matter_genPartials as genPartials, matter_glideS as glideS, matter_reverbWeave as reverbWeave, matter_subShimmer as subShimmer, matter_transient as transient };
+}
+
+/** P1+P2 — layout density × page warmth → bpm, clamped to [56, 116]. */
+declare function tempoFromPage(elementCount: number, warmthScale: number): number;
+declare const secondsPerBeat: (bpm: number) => number;
+/**
+ * P3 — offset (seconds from now) to the next grid boundary of `gridS` seconds that is at
+ * least `minAheadS` away. `phaseS` = seconds elapsed since the grid's epoch.
+ */
+declare function nextGridOffset(phaseS: number, gridS: number, minAheadS: number): number;
+/** Strums step in 32nd notes — the same gesture, now in the groove. Seconds. */
+declare const strumStepS: (bpm: number) => number;
+/** Echoes answer on 8ths, one octave up, quiet (PULSE.md §2). */
+declare const ECHO_TRANSPOSE = 12;
+declare const ECHO_VELOCITY_SCALE = 0.22;
+declare const ECHO_MIN_AHEAD_S = 0.08;
+declare const echoGridS: (bpm: number) => number;
+declare const DUCK_RECOVERY_MS = 2000;
+/** Activity count decays linearly: fully forgiven after count·2 s of silence. */
+declare const decayCount: (count: number, dtMs: number) => number;
+/** Velocity multiplier: the 6th rapid repeat sits at ~40%, never below. */
+declare const duckFactor: (count: number) => number;
+declare const PHRASE_PROBABILITY = 0.55;
+declare const PHRASE_MIN_NOTES = 2;
+declare const PHRASE_MAX_NOTES = 4;
+/** Reading order: rows of ~80 px, then left→right. Sort key for (top, left). */
+declare const readingOrderKey: (top: number, left: number) => number;
+/**
+ * Window the score by scroll progress: with n elements and a phrase of len, the playhead
+ * starts at `progress·(n − len)`.
+ */
+declare function phraseWindow(n: number, len: number, progress: number): number;
+
+declare const pulse_DUCK_RECOVERY_MS: typeof DUCK_RECOVERY_MS;
+declare const pulse_ECHO_MIN_AHEAD_S: typeof ECHO_MIN_AHEAD_S;
+declare const pulse_ECHO_TRANSPOSE: typeof ECHO_TRANSPOSE;
+declare const pulse_ECHO_VELOCITY_SCALE: typeof ECHO_VELOCITY_SCALE;
+declare const pulse_PHRASE_MAX_NOTES: typeof PHRASE_MAX_NOTES;
+declare const pulse_PHRASE_MIN_NOTES: typeof PHRASE_MIN_NOTES;
+declare const pulse_PHRASE_PROBABILITY: typeof PHRASE_PROBABILITY;
+declare const pulse_decayCount: typeof decayCount;
+declare const pulse_duckFactor: typeof duckFactor;
+declare const pulse_echoGridS: typeof echoGridS;
+declare const pulse_nextGridOffset: typeof nextGridOffset;
+declare const pulse_phraseWindow: typeof phraseWindow;
+declare const pulse_readingOrderKey: typeof readingOrderKey;
+declare const pulse_secondsPerBeat: typeof secondsPerBeat;
+declare const pulse_strumStepS: typeof strumStepS;
+declare const pulse_tempoFromPage: typeof tempoFromPage;
+declare namespace pulse {
+  export { pulse_DUCK_RECOVERY_MS as DUCK_RECOVERY_MS, pulse_ECHO_MIN_AHEAD_S as ECHO_MIN_AHEAD_S, pulse_ECHO_TRANSPOSE as ECHO_TRANSPOSE, pulse_ECHO_VELOCITY_SCALE as ECHO_VELOCITY_SCALE, pulse_PHRASE_MAX_NOTES as PHRASE_MAX_NOTES, pulse_PHRASE_MIN_NOTES as PHRASE_MIN_NOTES, pulse_PHRASE_PROBABILITY as PHRASE_PROBABILITY, pulse_decayCount as decayCount, pulse_duckFactor as duckFactor, pulse_echoGridS as echoGridS, pulse_nextGridOffset as nextGridOffset, pulse_phraseWindow as phraseWindow, pulse_readingOrderKey as readingOrderKey, pulse_secondsPerBeat as secondsPerBeat, pulse_strumStepS as strumStepS, pulse_tempoFromPage as tempoFromPage };
 }
 
 /**
@@ -743,7 +874,7 @@ declare namespace sphere {
  * Docs: https://github.com/frank890417/sonarium — start with docs/PLAN.md.
  */
 
-declare const version = "0.3.0";
+declare const version = "0.4.0";
 
 /**
  * Create a Sonarium instance. Safe to call before any user gesture: audio arms itself and
@@ -751,4 +882,4 @@ declare const version = "0.3.0";
  */
 declare function create(options?: SonariumOptions): Engine;
 
-export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, matter, midiToFreq, midiToNoteName, parseKey, rotationMatrix, siteKey, sphere as sphereMapping, unitVector, version };
+export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, chroma, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, matter, midiToFreq, midiToNoteName, parseKey, pulse, rotationMatrix, siteKey, sphere as sphereMapping, unitVector, version };

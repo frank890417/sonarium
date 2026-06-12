@@ -87,6 +87,11 @@
   .g-square { background: radial-gradient(circle at 30% 30%, rgba(255,84,112,.5), rgba(255,84,112,.12)); }
   #field-caption { color: var(--mut); font-size: 14px; margin-top: 14px; text-align: center; }
   #field-caption b { color: var(--ink); }
+  #chroma-row { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+  #chroma-row .cshape { width: 72px; height: 72px; border-radius: 18px; border: 1px solid rgba(255,255,255,.25); cursor: pointer; transition: transform .15s; }
+  #chroma-row .cshape:hover { transform: scale(1.07); }
+  #chroma-row span { color: var(--mut); font-size: 13px; max-width: 380px; }
+  #chroma-row span b { color: var(--ink); }
 
   /* ---- mapping legend ---- */
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
@@ -201,6 +206,13 @@
     <button class="shape g-sine"   style="left:5%;  top:74%; width:96px;  height:96px;  border-radius:50%"  aria-label="circle, lower left"></button>
   </div>
   <p id="field-caption"><b>Hover</b> to preview · <b>click</b> to play · <b>click empty space</b> to strum what's on screen, left to right</p>
+  <div id="chroma-row" aria-label="same shape, different mood">
+    <button class="cshape" style="background:hsl(350,72%,52%)" aria-label="crimson — warm and eager"></button>
+    <button class="cshape" style="background:hsl(40,85%,55%)" aria-label="amber — golden"></button>
+    <button class="cshape" style="background:hsl(180,60%,45%)" aria-label="teal — cool"></button>
+    <button class="cshape" style="background:hsl(230,65%,55%)" aria-label="indigo — nocturnal"></button>
+    <span>← same geometry, different <b>color</b>: warm ones strike eagerly with full body, cool ones open unhurried (CHROMA weave)</span>
+  </div>
 </section>
 
 <section aria-label="mappings">
@@ -234,6 +246,7 @@
       <label>horizontal position (stereo pan) <input type="range" id="lab-x" min="8" max="92" value="50"></label>
       <label>shadow softness (floats into the room) <input type="range" id="lab-s" min="0" max="40" value="12"></label>
       <label>opacity (solid tone → breathy air) <input type="range" id="lab-o" min="30" max="100" value="100"></label>
+      <label>hue (cool ↔ warm — color is mood) <input type="range" id="lab-c" min="0" max="360" value="205"></label>
       <div id="lab-readout">click the shape to hear it — its acoustic profile appears here</div>
     </div>
   </div>
@@ -286,7 +299,10 @@
       ...opts,
     });
     window.space = space;
-    space.on('start', () => { debug.started = true; });
+    space.on('start', () => {
+      debug.started = true;
+      document.getElementById('key-label').textContent = `${space.opts.key.label} · ${space.tempo} bpm`;
+    });
     space.on('trigger', (d) => {
       debug.triggers.push({ role: d.profile.role, midi: d.profile.midi, wave: d.profile.wave, art: d.articulation });
       if (debug.triggers.length > 300) debug.triggers.shift();
@@ -296,7 +312,8 @@
   }
   boot();
 
-  document.getElementById('key-label').textContent = Sonarium.siteKey(location.hostname).label;
+  // The engine's key includes the palette-chosen mode (CHROMA.md §3); tempo joins after start.
+  document.getElementById('key-label').textContent = `${space.opts.key.label} · ${space.tempo} bpm`;
 
   // ---------------------------------------------------------------- ripples
   const ripples = document.getElementById('ripples');
@@ -351,6 +368,8 @@
     lab.style.left = ctl('lab-x').value + '%';
     lab.style.boxShadow = `0 12px ${ctl('lab-s').value}px rgba(0,0,0,.45)`;
     lab.style.opacity = Number(ctl('lab-o').value) / 100;
+    const hue = Number(ctl('lab-c').value);
+    lab.style.background = `radial-gradient(circle at 32% 28%, hsl(${hue},75%,62%), hsl(${hue},70%,38%))`;
     describeLab();
     // profiles invalidate through a 150 ms mutation debounce — refresh once it settles
     clearTimeout(applyLab._t);
@@ -367,9 +386,10 @@
       `<b>weave</b>    attack ${(v.envelope.attackS * 1000).toFixed(0)} ms · burst ${(v.transient.level * 100).toFixed(0)}% · breath ${(v.breath.level * 100).toFixed(0)}%\n` +
       `         ${v.subShimmer.interval < 0 ? 'sub −8va' : 'shimmer +8va'} ${(v.subShimmer.level * 100).toFixed(0)}% · glide ${(v.glideS * 1000).toFixed(0)} ms · Q ${v.filter.q.toFixed(2)}\n` +
       `<b>room</b>     send ×${v.reverb.sendScale.toFixed(2)} · tail color ${Math.round(v.reverb.sendCutoffHz)} Hz · ${v.reverb.bloom > 0.5 ? 'blooms over the note' : 'dry strike'}\n` +
+      `<b>chroma</b>   warmth ${p.chroma.warmth.toFixed(2)} · sat ${p.chroma.saturation.toFixed(2)} · lum ${p.chroma.luminance.toFixed(2)}\n` +
       `<b>sphere</b>   az ${(p.sphere.azimuth / Sonarium.DEG).toFixed(0)}° · extent ${p.sphere.extent.toFixed(2)} · directivity ${p.sphere.directivity.toFixed(2)}`;
   }
-  for (const id of ['lab-w', 'lab-h', 'lab-r', 'lab-x', 'lab-s', 'lab-o']) ctl(id).addEventListener('input', applyLab);
+  for (const id of ['lab-w', 'lab-h', 'lab-r', 'lab-x', 'lab-s', 'lab-o', 'lab-c']) ctl(id).addEventListener('input', applyLab);
   lab.addEventListener('click', () => setTimeout(describeLab, 50));
   applyLab();
 </script>

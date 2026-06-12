@@ -42,8 +42,19 @@ That's the whole integration. The page now *hears itself*:
   a wide desktop is a concert hall.
 - **Your body becomes the listener.** The cursor is your ears on desktop; on mobile, tilting the
   device steers the listener and a shake strums everything on screen, left to right.
-- **Every site gets a sonic identity.** The hostname deterministically picks a musical key and
-  scale — same site, same key, every visit. Nothing ever plays outside that scale.
+- **Color is mood; the palette is the key (v0.4).** Element colors tint their voices — warm
+  strikes eagerly with a full body, cool opens unhurried, vivid colors get vivid spectra — and
+  the **page palette chooses the musical mode** (warm-bright → lydian … cool-dark → minor
+  pentatonic) while the hostname keeps the root. Spec: [docs/CHROMA.md](./docs/CHROMA.md).
+- **The page has a pulse (v0.4).** Layout density sets a tempo (56–116 bpm); strong clicks get a
+  quiet **echo on the next 8th note** (the primary hit is never delayed — feel first, meter
+  second); and with ambience on, the page softly **plays its own layout in reading order** —
+  scroll moves the playhead through the score. Repeated sounds politely duck and recover (the
+  calm system). Spec: [docs/PULSE.md](./docs/PULSE.md).
+- **Designers can author it in CSS.** The aural stylesheet: `--sonic-*` custom properties
+  inherit down the tree (`nav { --sonic-wave: sine }`, `--sonic-key`/`--sonic-tempo` at root).
+- **Every site gets a sonic identity.** The hostname deterministically picks the root pitch —
+  same site, same tonal center, every visit. Nothing ever plays outside the scale.
 
 🎧 *Wear headphones. Then go click around the [demo](https://frank890417.github.io/sonarium/).*
 
@@ -185,11 +196,13 @@ HRIRs, head tracking, AmbiX field export.
 **v0.3 "Woven 織" — shipped**: the Matter model ([docs/MATTER.md](./docs/MATTER.md)) — continuous
 per-element spectra, transient bursts, breath layers, glides, reverb color/bloom, scroll
 air-rush; every weave carries a blindfold-test acceptance criterion.
-**v0.4 "Chromatic"** — color→brightness mapping, `--sonic-*` CSS custom properties (a real aural
-stylesheet), drag glissandi, adaptive ducking, npm publish, and `/lab`: an online replication of
-the thesis mismatch experiment to validate every mapping with real listeners.
-**v0.4 "Embodied"** — gesture grammar, Web MIDI, WebXR listener, multi-user rooms (hear other
-cursors). **v0.5 "Ecosystem"** — visual theme editor + shareable/remixable theme registry.
+**v0.4 "Alive 活" — shipped**: the Chroma weave + the Pulse ([CHROMA.md](./docs/CHROMA.md) /
+[PULSE.md](./docs/PULSE.md)) — color as mood, palette as mode, layout tempo, metered echoes,
+phrase engine, the aural stylesheet, the calm system.
+**v0.5 "Instrumented"** — npm publish, `/lab` (the thesis mismatch experiment online, validating
+every weave with real listeners), performance pass, typography research, drag glissandi.
+**v0.6 "Embodied"** — gesture grammar, Web MIDI, WebXR listener, multi-user rooms (hear other
+cursors). **v0.7 "Ecosystem"** — visual theme editor + shareable/remixable theme registry.
 **v1.0 "Standard"** — stability, formal a11y audit, and a community spec for `--sonic-*`.
 Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
 
@@ -197,6 +210,12 @@ Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
 
 **Sonarium 讓任何網頁加上一行 script，就變成一個立體聲學空間。**
 
+- **顏色是情緒，調色盤就是調性**（v0.4）：元素的顏色為它的聲音上色 — 暖色急切有力、冷色從容開展、
+  飽和的顏色頻譜更豐富；而**整頁的配色決定音樂調式**（暖亮 → lydian…冷暗 → 小調五聲），域名仍保留
+  主音（識別不變）。版面密度決定頁面的**速度**（56–116 bpm）；用力點擊會在下一個八分音符得到安靜的
+  回聲（主要聲音永不延遲 — 手感優先）；開啟環境音時，頁面會以閱讀順序輕聲**演奏自己的版面**，捲動
+  就是移動樂譜的播放頭。重複的聲音會禮貌地退讓再恢復（calm 系統）。設計師可以直接在 CSS 裡寫聲音：
+  `--sonic-*` 自訂屬性會沿著樹繼承。規格：[CHROMA.md](./docs/CHROMA.md)、[PULSE.md](./docs/PULSE.md)。
 - **幾何是材質，不是參數**（v0.3）：視覺屬性凝聚成四個宏觀維度 — **銳（edge）、質（mass）、
   紋（texture）、距（air）** — 每個維度同時牽動一整束同步變化的聲音線索（Bregman 聽覺場景分析：
   同步共變的線索會融合成「一個物體」）。尖銳的按鈕真的會「喀」一聲（/k/ 噪聲爆發）、亮且乾；
