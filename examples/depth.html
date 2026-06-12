@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Depth — hear the DOM tree · Sonarium</title>
+<style>
+  :root { --bg:#0a0c14; --ink:#e9ebf7; --mut:#9aa3bf; --line:rgba(255,255,255,.12); }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Space Grotesk", system-ui, sans-serif; padding: 28px clamp(14px, 5vw, 60px) 80px; }
+  a { color: #1de3c0; }
+  h1 { font-size: clamp(26px, 5vw, 40px); margin: 10px 0 6px; }
+  p.lead { color: var(--mut); max-width: 680px; margin-bottom: 30px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+  @media (max-width: 880px) { .cols { grid-template-columns: 1fr; } }
+  h2 { font-size: 18px; margin-bottom: 12px; color: var(--mut); font-weight: 500; }
+
+  .nest {
+    border: 1px solid var(--line); border-radius: 18px; padding: 26px; cursor: pointer;
+    background: rgba(124,212,253,.05); transition: background .2s;
+  }
+  .nest:hover { background: rgba(124,212,253,.1); }
+  .nest span { display: block; font-size: 12.5px; color: var(--mut); margin-bottom: 12px; letter-spacing: .06em; }
+
+  .runs button {
+    font: inherit; color: var(--ink); cursor: pointer; border: 1px solid var(--line);
+    background: rgba(157,140,255,.12); padding: 14px 0; width: 100%; margin-bottom: 10px;
+  }
+  .runs .r0 { border-radius: 0; }
+  .runs .r1 { border-radius: 8px; }
+  .runs .r2 { border-radius: 16px; }
+  .runs .r3 { border-radius: 24px; }
+  .runs .r4 { border-radius: 999px; }
+  ol { margin: 14px 0 0 20px; color: var(--mut); }
+  ol li { padding: 8px 6px; cursor: pointer; }
+  ol li:hover { color: var(--ink); }
+  footer { margin-top: 50px; color: var(--mut); font-size: 14px; }
+</style>
+</head>
+<body>
+
+<a href="./index.html">← Sonarium</a>
+<h1>The tree has a sound.</h1>
+<p class="lead">Left: five boxes nested inside each other — click inward and hear each level get <b>farther and more muffled</b> (DOM depth → distance + low-pass). Right: siblings share a parent, so they <b>climb the same scale</b> — and roundness morphs each step's voice.</p>
+
+<div class="cols">
+  <div>
+    <h2>① nesting = distance</h2>
+    <div class="nest"><span>DEPTH 1 — near, bright</span>
+      <div class="nest"><span>DEPTH 2</span>
+        <div class="nest"><span>DEPTH 3</span>
+          <div class="nest"><span>DEPTH 4</span>
+            <div class="nest"><span>DEPTH 5 — far, muffled</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <h2>② siblings = a melody · roundness = the voice</h2>
+    <div class="runs">
+      <button class="r0">step 1 — square corners (kiki)</button>
+      <button class="r1">step 2</button>
+      <button class="r2">step 3</button>
+      <button class="r3">step 4</button>
+      <button class="r4">step 5 — full pill (bouba)</button>
+    </div>
+    <h2 style="margin-top:26px">③ a list is an arpeggio</h2>
+    <ol>
+      <li>do — first item</li>
+      <li>re — second item</li>
+      <li>mi — third item</li>
+      <li>sol — fourth item</li>
+      <li>la — fifth item</li>
+    </ol>
+  </div>
+</div>
+
+<footer>Every <code>div.nest</code> here carries <code>data-sonic-role="button"</code> so containers play directly instead of strumming. View source — that's the whole trick.</footer>
+
+<script>
+  // Mark the nest boxes as directly playable (containers normally strum their children).
+  document.querySelectorAll('.nest').forEach((el) => el.setAttribute('data-sonic-role', 'button'));
+</script>
+<script src="../dist/sonarium.iife.js" data-auto data-ambient="0.1"></script>
+<script>
+  window.__sonariumDebug = { started: false, triggers: [], errors: [] };
+  window.addEventListener('error', (e) => __sonariumDebug.errors.push(String(e.message)));
+  addEventListener('DOMContentLoaded', () => {
+    if (window.sonarium) {
+      sonarium.on('start', () => { __sonariumDebug.started = true; });
+      sonarium.on('trigger', (d) => __sonariumDebug.triggers.push({ art: d.articulation, filter: Math.round(d.profile.filterHz) }));
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+{
+  "name": "sonarium",
+  "version": "0.1.0",
+  "description": "Drop-in acoustic UX — one script tag turns any webpage into a spatial sound field. Layout becomes a stereo stage, geometry becomes timbre (Kiki/Bouba), the DOM tree becomes depth and harmony, the viewport becomes a room.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "serve": "vite"
+  },
+  "keywords": [
+    "audio",
+    "web-audio",
+    "tone.js",
+    "sonification",
+    "spatial-audio",
+    "acoustic-ux",
+    "sound-design",
+    "accessibility",
+    "kiki-bouba",
+    "ui-sound",
+    "creative-coding"
+  ],
+  "author": "Che-Yu Wu <frank890417@gmail.com> (https://cheyuwu.com)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frank890417/sonarium.git"
+  },
+  "homepage": "https://frank890417.github.io/sonarium/",
+  "bugs": {
+    "url": "https://github.com/frank890417/sonarium/issues"
+  },
+  "dependencies": {
+    "tone": "^15.1.22"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0",
+    "vitest": "^3.2.0"
+  }
+}

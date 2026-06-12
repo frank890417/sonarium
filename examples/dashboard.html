@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acme Analytics — a Sonarium demo</title>
+<style>
+  :root { --bg:#f4f5fa; --card:#fff; --ink:#1c2030; --mut:#697089; --line:#e3e6f0; --brand:#5b5bd6; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .note {
+    background: #14161f; color: #cfd5ee; padding: 10px 18px; font-size: 13.5px; text-align: center;
+  }
+  .note code { color: #7cd4fd; }
+  .note a { color: #1de3c0; }
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 41px); }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } aside { display: none; } }
+
+  aside { background: var(--card); border-right: 1px solid var(--line); padding: 22px 14px; }
+  aside .brand { font-weight: 700; font-size: 18px; padding: 0 10px 18px; color: var(--brand); }
+  aside nav a {
+    display: block; padding: 10px 12px; border-radius: 10px; color: var(--mut);
+    text-decoration: none; font-size: 14.5px; margin-bottom: 2px;
+  }
+  aside nav a.active, aside nav a:hover { background: #eef0fb; color: var(--ink); }
+
+  main { padding: 26px clamp(16px, 3.5vw, 40px); }
+  main h1 { font-size: 24px; margin-bottom: 4px; }
+  main p.sub { color: var(--mut); font-size: 14px; margin-bottom: 22px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; box-shadow: 0 8px 24px rgba(28,32,48,.06); }
+  .stat h3 { font-size: 12.5px; color: var(--mut); font-weight: 500; }
+  .stat .v { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .stat .d { font-size: 12.5px; margin-top: 2px; }
+  .up { color: #18794e; } .down { color: #cd2b31; }
+
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 22px; box-shadow: 0 8px 24px rgba(28,32,48,.06); }
+  .panel h2 { font-size: 16px; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--mut); font-weight: 500; font-size: 12.5px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 11px 10px; border-bottom: 1px solid var(--line); }
+  .pill { padding: 3px 10px; border-radius: 999px; font-size: 12px; }
+  .pill.ok { background: #e6f6ee; color: #18794e; }
+  .pill.warn { background: #fff1e0; color: #ad5700; }
+
+  form { display: grid; gap: 12px; max-width: 460px; }
+  label { font-size: 13px; color: var(--mut); display: grid; gap: 5px; }
+  input[type=text], input[type=email], select, textarea {
+    font: inherit; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fbfbfe;
+  }
+  .row { display: flex; gap: 16px; align-items: center; font-size: 14px; color: var(--ink); }
+  .actions { display: flex; gap: 10px; margin-top: 4px; }
+  button {
+    font: inherit; cursor: pointer; padding: 10px 18px; border-radius: 9px; border: 1px solid var(--line); background: #fff;
+  }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; border-radius: 999px; }
+</style>
+</head>
+<body>
+
+<div class="note" data-sonic="off">
+  🔊 This whole page is sonified by <b>one line</b>:
+  <code>&lt;script src="sonarium.iife.js" data-auto data-theme="paper"&gt;</code>
+  — nothing else on the page mentions audio. <a href="./index.html">← back to Sonarium</a>
+</div>
+
+<div class="layout">
+  <aside>
+    <div class="brand">◆ Acme</div>
+    <nav aria-label="main">
+      <a href="#" class="active">Overview</a>
+      <a href="#">Reports</a>
+      <a href="#">Customers</a>
+      <a href="#">Billing</a>
+      <a href="#">Settings</a>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Good evening, Yu</h1>
+    <p class="sub">Here's what changed while you were away. Hover the nav — hear it climb the scale. Tab through the form — Sonarium follows focus.</p>
+
+    <div class="stats">
+      <div class="stat"><h3>Revenue</h3><div class="v">$48,210</div><div class="d up">▲ 12.4%</div></div>
+      <div class="stat"><h3>Active users</h3><div class="v">8,944</div><div class="d up">▲ 3.1%</div></div>
+      <div class="stat"><h3>Churn</h3><div class="v">1.9%</div><div class="d down">▼ 0.4%</div></div>
+      <div class="stat"><h3>Tickets</h3><div class="v">37</div><div class="d down">▲ 9</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Latest orders — each row is a note in this page's key</h2>
+      <table>
+        <thead><tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>#10422</td><td>Mira Chen</td><td>$129.00</td><td><span class="pill ok">Paid</span></td></tr>
+          <tr><td>#10421</td><td>Diego Ramos</td><td>$540.00</td><td><span class="pill ok">Paid</span></td></tr>
+          <tr><td>#10420</td><td>Aoife Byrne</td><td>$89.00</td><td><span class="pill warn">Pending</span></td></tr>
+          <tr><td>#10419</td><td>Kenji Sato</td><td>$1,204.00</td><td><span class="pill ok">Paid</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Invite a teammate — type and listen to the field fill up</h2>
+      <form onsubmit="return false">
+        <label>Full name <input type="text" placeholder="Ada Lovelace"></label>
+        <label>Email <input type="email" placeholder="ada@example.com"></label>
+        <label>Role
+          <select><option>Viewer</option><option>Editor</option><option>Admin</option></select>
+        </label>
+        <div class="row">
+          <label class="row"><input type="checkbox" checked> Send welcome email</label>
+          <label class="row"><input type="checkbox"> Add to billing</label>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">Send invite</button>
+          <button type="reset">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<!-- The one line. -->
+<script src="../dist/sonarium.iife.js" data-auto data-theme="paper" data-ambient="0.08"></script>
+<script>
+  // Demo instrumentation only (not needed in real use): expose state for testing.
+  window.__sonariumDebug = { started: false, triggers: [], errors: [] };
+  window.addEventListener('error', (e) => __sonariumDebug.errors.push(String(e.message)));
+  addEventListener('DOMContentLoaded', () => {
+    if (window.sonarium) {
+      sonarium.on('start', () => { __sonariumDebug.started = true; });
+      sonarium.on('trigger', (d) => __sonariumDebug.triggers.push(d.articulation));
+    }
+  });
+</script>
+</body>
+</html>

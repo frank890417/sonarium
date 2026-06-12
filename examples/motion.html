@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motion — your body is the listener · Sonarium</title>
+<style>
+  :root { --bg:#07080f; --ink:#e9ebf7; --mut:#9aa3bf; --line:rgba(255,255,255,.14); }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Space Grotesk", system-ui, sans-serif; padding: 22px 18px 90px; min-height: 100vh; }
+  a { color: #1de3c0; }
+  h1 { font-size: clamp(26px, 7vw, 38px); margin: 8px 0 6px; }
+  p.lead { color: var(--mut); margin-bottom: 8px; max-width: 560px; }
+  .hud {
+    display: inline-block; margin: 10px 0 22px; padding: 8px 14px; border: 1px solid var(--line);
+    border-radius: 999px; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--mut);
+  }
+  .pads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 560px; }
+  .pads button {
+    aspect-ratio: 1; border: 1px solid var(--line); cursor: pointer; font: inherit; color: var(--ink);
+    background: radial-gradient(circle at 30% 30%, rgba(124,212,253,.35), rgba(157,140,255,.08));
+  }
+  .pads button:active { transform: scale(.94); }
+  .pads .p0 { border-radius: 0; }   .pads .p1 { border-radius: 10px; } .pads .p2 { border-radius: 50%; }
+  .pads .p3 { border-radius: 6px; } .pads .p4 { border-radius: 24px; } .pads .p5 { border-radius: 50%; }
+  .pads .p6 { border-radius: 0; }   .pads .p7 { border-radius: 16px; } .pads .p8 { border-radius: 999px; }
+  .big { margin-top: 26px; max-width: 560px; display: grid; gap: 12px; }
+  .big button {
+    font: inherit; color: var(--ink); cursor: pointer; padding: 22px; border: 1px solid var(--line);
+    background: linear-gradient(120deg, rgba(29,227,192,.14), rgba(112,72,232,.14)); border-radius: 999px;
+  }
+  ul.tips { margin: 26px 0 0 18px; color: var(--mut); max-width: 560px; }
+  ul.tips li { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<a href="./index.html">← Sonarium</a>
+<h1>Tilt. Shake. Listen.</h1>
+<p class="lead">Open this on a phone with headphones. Your device's attitude steers the listener through the sound field; a firm shake strums everything on screen, left to right.</p>
+<div class="hud" id="hud" data-sonic="off">tilt γ — · β — · waiting for motion…</div>
+
+<div class="pads" aria-label="nine pads">
+  <button class="p0" aria-label="pad 1"></button>
+  <button class="p1" aria-label="pad 2"></button>
+  <button class="p2" aria-label="pad 3"></button>
+  <button class="p3" aria-label="pad 4"></button>
+  <button class="p4" aria-label="pad 5"></button>
+  <button class="p5" aria-label="pad 6"></button>
+  <button class="p6" aria-label="pad 7"></button>
+  <button class="p7" aria-label="pad 8"></button>
+  <button class="p8" aria-label="pad 9"></button>
+</div>
+
+<div class="big">
+  <button>strum the page (or just shake it)</button>
+</div>
+
+<ul class="tips">
+  <li>🎧 spatialization is HRTF — headphones make the field real.</li>
+  <li>📳 iOS asks permission for motion sensors on your first tap.</li>
+  <li>↔ tilting left/right slides your ears across the room (γ → ±4 m).</li>
+  <li>🤝 the grid is nine siblings: tap across a row and you're playing a scale.</li>
+</ul>
+
+<script src="../dist/sonarium.iife.js" data-auto data-ambient="0.15"></script>
+<script>
+  window.__sonariumDebug = { started: false, triggers: [], errors: [] };
+  window.addEventListener('error', (e) => __sonariumDebug.errors.push(String(e.message)));
+
+  const hud = document.getElementById('hud');
+  window.addEventListener('deviceorientation', (e) => {
+    if (e.gamma == null) return;
+    hud.textContent = `tilt γ ${e.gamma.toFixed(0)}° · β ${e.beta.toFixed(0)}° — your ears are moving`;
+  }, { passive: true });
+
+  addEventListener('DOMContentLoaded', () => {
+    if (window.sonarium) {
+      sonarium.on('start', () => { __sonariumDebug.started = true; });
+      sonarium.on('trigger', (d) => __sonariumDebug.triggers.push(d.articulation));
+      document.querySelector('.big button').addEventListener('click', () => {
+        sonarium.strum(sonarium.scanner.visibleElements(), 0.5);
+      });
+    }
+  });
+</script>
+</body>
+</html>

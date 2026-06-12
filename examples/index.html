@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sonarium — the page is the instrument</title>
+<meta name="description" content="Drop-in acoustic UX: one script tag turns any webpage into a spatial sound field. Geometry becomes timbre, layout becomes a stereo stage, the DOM becomes harmony.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔊</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07080f; --panel: rgba(255,255,255,.045); --line: rgba(255,255,255,.1);
+    --ink: #e9ebf7; --mut: #9aa3bf;
+    --square: #ff5470; --saw: #ffb347; --tri: #7cd4fd; --sine: #9d8cff;
+    --accent: #1de3c0;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6; overflow-x: hidden;
+  }
+  body::before {
+    content: ""; position: fixed; inset: -20%; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(40% 50% at 12% 8%, rgba(29,227,192,.14), transparent 70%),
+      radial-gradient(45% 55% at 88% 18%, rgba(112,72,232,.18), transparent 70%),
+      radial-gradient(50% 60% at 50% 110%, rgba(230,73,128,.12), transparent 70%);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px clamp(16px, 5vw, 64px);
+  }
+  .logo { font-weight: 700; font-size: 20px; letter-spacing: .04em; }
+  .logo i { font-style: normal; color: var(--accent); }
+  nav.top { display: flex; gap: 22px; font-size: 14px; }
+  nav.top a { color: var(--mut); padding: 6px 2px; }
+  nav.top a:hover { color: var(--ink); }
+
+  .hero { text-align: center; padding: clamp(40px, 9vh, 110px) 20px 28px; }
+  .hero h1 {
+    font-size: clamp(44px, 9vw, 104px); font-weight: 700; letter-spacing: -.02em; line-height: 1.04;
+    background: linear-gradient(95deg, #e9ebf7 20%, #7cd4fd 45%, #9d8cff 65%, #ff8fb3 90%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.tag { max-width: 640px; margin: 18px auto 8px; color: var(--mut); font-size: clamp(15px, 2.2vw, 19px); }
+  .hero p.hint { color: var(--accent); font-size: 14px; letter-spacing: .06em; }
+  .key-chip {
+    display: inline-block; margin-top: 14px; padding: 6px 14px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--panel); color: var(--mut); font-size: 13px;
+  }
+  .key-chip b { color: var(--ink); }
+  .cta { display: flex; gap: 14px; justify-content: center; margin-top: 26px; flex-wrap: wrap; }
+  .btn {
+    font: inherit; cursor: pointer; color: var(--ink); padding: 13px 26px;
+    border: 1px solid var(--line); background: var(--panel); transition: transform .12s ease;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.round { border-radius: 999px; background: linear-gradient(120deg, rgba(124,212,253,.16), rgba(157,140,255,.16)); }
+  .btn.sharp { border-radius: 0; background: linear-gradient(120deg, rgba(255,84,112,.16), rgba(255,179,71,.12)); }
+
+  section { padding: clamp(34px, 7vh, 80px) clamp(16px, 6vw, 72px); max-width: 1200px; margin: 0 auto; }
+  section > h2 { font-size: clamp(24px, 4vw, 36px); margin-bottom: 8px; letter-spacing: -.01em; }
+  section > p.lead { color: var(--mut); max-width: 700px; margin-bottom: 28px; }
+
+  /* ---- the field ---- */
+  #field-stage {
+    position: relative; height: min(64vh, 560px); border: 1px solid var(--line); border-radius: 24px;
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+    overflow: hidden; cursor: crosshair;
+  }
+  .shape {
+    position: absolute; border: 1px solid rgba(255,255,255,.22); cursor: pointer;
+    transition: transform .15s ease, box-shadow .3s ease; padding: 0;
+  }
+  .shape:hover { transform: scale(1.06); }
+  .shape:active { transform: scale(.95); }
+  .shape:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .g-sine   { background: radial-gradient(circle at 30% 30%, rgba(157,140,255,.55), rgba(157,140,255,.12)); }
+  .g-tri    { background: radial-gradient(circle at 30% 30%, rgba(124,212,253,.5), rgba(124,212,253,.1)); }
+  .g-saw    { background: radial-gradient(circle at 30% 30%, rgba(255,179,71,.5), rgba(255,179,71,.1)); }
+  .g-square { background: radial-gradient(circle at 30% 30%, rgba(255,84,112,.5), rgba(255,84,112,.12)); }
+  #field-caption { color: var(--mut); font-size: 14px; margin-top: 14px; text-align: center; }
+  #field-caption b { color: var(--ink); }
+
+  /* ---- mapping legend ---- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 16px; padding: 18px; background: var(--panel);
+  }
+  .card h3 { font-size: 15px; margin-bottom: 6px; }
+  .card h3 span { color: var(--accent); margin-right: 8px; }
+  .card p { color: var(--mut); font-size: 13.5px; }
+  .card code { color: var(--tri); font-size: 12.5px; }
+
+  /* ---- shape lab ---- */
+  #lab { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: stretch; }
+  @media (max-width: 860px) { #lab { grid-template-columns: 1fr; } }
+  #lab-stage {
+    position: relative; min-height: 320px; border: 1px solid var(--line); border-radius: 20px;
+    background: var(--panel); overflow: hidden;
+  }
+  #lab-shape {
+    position: absolute; top: 50%; transform: translate(-50%, -50%);
+    border: 1px solid rgba(255,255,255,.3); cursor: pointer;
+    background: radial-gradient(circle at 32% 28%, rgba(124,212,253,.6), rgba(157,140,255,.18));
+    box-shadow: 0 12px 28px rgba(0,0,0,.4);
+  }
+  .lab-controls label { display: block; font-size: 13px; color: var(--mut); margin: 14px 0 4px; }
+  .lab-controls input[type=range] { width: 100%; accent-color: var(--accent); }
+  #lab-readout {
+    margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+    background: rgba(0,0,0,.3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; color: var(--mut); white-space: pre-wrap; min-height: 110px;
+  }
+  #lab-readout b { color: var(--accent); }
+
+  /* ---- demos ---- */
+  .demo-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+  .demo-links a.card { display: block; color: var(--ink); }
+  .demo-links a.card:hover { text-decoration: none; border-color: var(--accent); }
+
+  footer { padding: 40px 20px 120px; text-align: center; color: var(--mut); font-size: 14px; }
+
+  /* ---- control bar ---- */
+  #bar {
+    position: fixed; left: 16px; bottom: 16px; z-index: 50; display: flex; gap: 10px; align-items: center;
+    padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px;
+    background: rgba(10, 12, 22, .8); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    font-size: 13px; flex-wrap: wrap; max-width: calc(100vw - 100px);
+  }
+  #bar select, #bar button {
+    font: inherit; color: var(--ink); background: rgba(255,255,255,.07);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  }
+  #bar input[type=range] { width: 80px; accent-color: var(--accent); }
+  #bar label { color: var(--mut); display: flex; gap: 6px; align-items: center; }
+
+  /* ---- ripples ---- */
+  #ripples { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
+  .ripple {
+    position: absolute; border-radius: 50%; border: 2px solid; transform: translate(-50%, -50%) scale(.2);
+    opacity: .9; animation: rip var(--dur, .7s) ease-out forwards;
+  }
+  @keyframes rip {
+    to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+  }
+
+  /* ---- inspector ---- */
+  #tip {
+    position: fixed; z-index: 60; max-width: 340px; padding: 12px 14px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(8,10,18,.94); color: var(--mut);
+    font-size: 12px; line-height: 1.5; pointer-events: none; display: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #tip b { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">son<i>arium</i></div>
+  <nav class="top" aria-label="site">
+    <a href="https://github.com/frank890417/sonarium">GitHub</a>
+    <a href="https://github.com/frank890417/sonarium/blob/main/docs/MAPPING.md">Mapping&nbsp;Canon</a>
+    <a href="./dashboard.html">Demos</a>
+  </nav>
+</header>
+
+<section class="hero" aria-label="intro">
+  <h1>The page is<br>the instrument.</h1>
+  <p class="tag">Sonarium turns any webpage into an acoustic space. Geometry becomes timbre, layout becomes a stereo stage, the DOM tree becomes harmony — with one script tag.</p>
+  <p class="hint">🎧 wear headphones · click anything · your cursor is the microphone</p>
+  <div><span class="key-chip">this page plays in <b id="key-label">…</b> — its address decides its key</span></div>
+  <div class="cta">
+    <button class="btn round" id="cta-strum">◉ Strum this page</button>
+    <button class="btn sharp" onclick="location.href='https://github.com/frank890417/sonarium#readme'">▢ Read the docs</button>
+  </div>
+</section>
+
+<section aria-label="soundfield">
+  <h2>The soundfield</h2>
+  <p class="lead">Twelve shapes, one rule-set. Position sets the stereo placement, size sets pitch and weight, corner radius morphs the wave from <b style="color:var(--square)">square</b> through <b style="color:var(--saw)">sawtooth</b> and <b style="color:var(--tri)">triangle</b> to <b style="color:var(--sine)">sine</b> — the Kiki/Bouba effect, made executable.</p>
+  <div id="field-stage" aria-label="interactive sound field">
+    <button class="shape g-square" style="left:6%;  top:12%; width:64px;  height:64px;  border-radius:0"    aria-label="sharp small square, upper left"></button>
+    <button class="shape g-square" style="left:22%; top:58%; width:120px; height:52px;  border-radius:4px"  aria-label="sharp bar, mid left"></button>
+    <button class="shape g-saw"    style="left:14%; top:34%; width:88px;  height:88px;  border-radius:14px" aria-label="slightly rounded, left"></button>
+    <button class="shape g-saw"    style="left:36%; top:16%; width:150px; height:60px;  border-radius:18px" aria-label="rounded bar, upper middle"></button>
+    <button class="shape g-tri"    style="left:44%; top:62%; width:104px; height:104px; border-radius:34px" aria-label="soft square, lower middle"></button>
+    <button class="shape g-tri"    style="left:58%; top:34%; width:72px;  height:72px;  border-radius:26px" aria-label="soft small square, middle right"></button>
+    <button class="shape g-sine"   style="left:70%; top:12%; width:140px; height:140px; border-radius:50%"  aria-label="large circle, upper right"></button>
+    <button class="shape g-sine"   style="left:84%; top:56%; width:60px;  height:60px;  border-radius:50%"  aria-label="small circle, lower right"></button>
+    <button class="shape g-sine"   style="left:30%; top:80%; width:180px; height:44px;  border-radius:999px" aria-label="long pill, bottom"></button>
+    <button class="shape g-square" style="left:62%; top:78%; width:46px;  height:46px;  border-radius:0"    aria-label="tiny sharp square, bottom right"></button>
+    <button class="shape g-tri"    style="left:90%; top:28%; width:42px;  height:90px;  border-radius:16px" aria-label="thin vertical bar, right edge"></button>
+    <button class="shape g-sine"   style="left:5%;  top:74%; width:96px;  height:96px;  border-radius:50%"  aria-label="circle, lower left"></button>
+  </div>
+  <p id="field-caption"><b>Hover</b> to preview · <b>click</b> to play · <b>click empty space</b> to strum what's on screen, left to right</p>
+</section>
+
+<section aria-label="mappings">
+  <h2>How it hears your page</h2>
+  <p class="lead">Ten mappings, each backed by cross-modal perception research — see the <a href="https://github.com/frank890417/sonarium/blob/main/docs/MAPPING.md">Mapping Canon</a> for formulas and the <a href="https://github.com/frank890417/sonarium/blob/main/docs/RESEARCH.md">research notes</a> for citations.</p>
+  <div class="grid">
+    <div class="card"><h3><span>↔</span>Position → stereo stage</h3><p>An element's x/y becomes its place in a 3D sound field. Left button, left sound. <code>HRTF</code> spatialization.</p></div>
+    <div class="card"><h3><span>◻→◯</span>Roundness → waveform</h3><p>Border radius morphs the oscillator: sharp corners bite (square), pills breathe (sine). Kiki/Bouba, executable.</p></div>
+    <div class="card"><h3><span>⤢</span>Size → pitch &amp; weight</h3><p>Big elements speak low and loud; small ones chirp high and quiet — the physics of resonance, borrowed.</p></div>
+    <div class="card"><h3><span>▭</span>Elongation → duration</h3><p>A square ticks; a long bar sweeps. Shape length maps to note length.</p></div>
+    <div class="card"><h3><span>≣</span>DOM depth → distance</h3><p>Deeply nested elements sound farther away and more muffled — the tree becomes acoustic depth.</p></div>
+    <div class="card"><h3><span>♫</span>Siblings → melody</h3><p>Children of one parent climb the same scale. A nav is a run; a list is an arpeggio.</p></div>
+    <div class="card"><h3><span>⌂</span>Viewport → the room</h3><p>Page width sets the reverb. A phone is a dry booth; a wide desktop is a hall.</p></div>
+    <div class="card"><h3><span>#</span>Domain → key</h3><p>The hostname hashes to a musical key and scale — every site gets a deterministic sonic identity.</p></div>
+    <div class="card"><h3><span>⇪</span>Shadow → air</h3><p>Box-shadow blur lifts an element into the reverb: elevated UI floats in the room.</p></div>
+    <div class="card"><h3><span>⌨</span>Typing → filling up</h3><p>Keystrokes tick upward as a field fills. Toggles answer with rising or falling fifths.</p></div>
+  </div>
+</section>
+
+<section aria-label="shape laboratory">
+  <h2>Shape lab</h2>
+  <p class="lead">Bend one element's geometry and hear the mapping respond. The readout is <code>sonarium.describe(element)</code> — the library always explains itself.</p>
+  <div id="lab">
+    <div id="lab-stage">
+      <button id="lab-shape" style="left:50%; width:160px; height:90px; border-radius:18px" aria-label="laboratory shape"></button>
+    </div>
+    <div class="lab-controls">
+      <label>width <input type="range" id="lab-w" min="40" max="380" value="160"></label>
+      <label>height <input type="range" id="lab-h" min="40" max="240" value="90"></label>
+      <label>roundness (kiki ◻ → bouba ◯) <input type="range" id="lab-r" min="0" max="100" value="30"></label>
+      <label>horizontal position (stereo pan) <input type="range" id="lab-x" min="8" max="92" value="50"></label>
+      <div id="lab-readout">click the shape to hear it — its acoustic profile appears here</div>
+    </div>
+  </div>
+</section>
+
+<section aria-label="more demos">
+  <h2>More rooms to hear</h2>
+  <p class="lead">Each demo is an unmodified page plus one script tag.</p>
+  <div class="demo-links grid">
+    <a class="card" href="./dashboard.html"><h3><span>▦</span>Dashboard</h3><p>A realistic SaaS UI. The only audio code on the page is one line.</p></a>
+    <a class="card" href="./depth.html"><h3><span>≣</span>Depth</h3><p>Nested boxes — hear the DOM tree as acoustic distance and harmony.</p></a>
+    <a class="card" href="./motion.html"><h3><span>◐</span>Motion</h3><p>On a phone: tilt to steer your ears, shake to strum the page.</p></a>
+  </div>
+</section>
+
+<footer>
+  <p>Sonarium · MIT · built on <a href="https://tonejs.github.io/">Tone.js</a> · grown from <a href="https://cheyuwu.com/thesis">“Sound and Cognition” (NYU IDM thesis, 2020)</a> by <a href="https://cheyuwu.com">Che-Yu Wu</a></p>
+</footer>
+
+<div id="bar" aria-label="sonarium controls">
+  <label>theme
+    <select id="ctl-theme" aria-label="theme">
+      <option value="aurora" selected>aurora</option>
+      <option value="mono">mono</option>
+      <option value="paper">paper</option>
+    </select>
+  </label>
+  <label>ambience <input type="range" id="ctl-ambient" min="0" max="100" value="12" aria-label="ambience level"></label>
+  <label><input type="checkbox" id="ctl-inspect"> inspect</label>
+  <button id="ctl-strum">strum</button>
+</div>
+
+<div id="ripples" aria-hidden="true"></div>
+<div id="tip" role="status"></div>
+
+<script src="../dist/sonarium.iife.js"></script>
+<script>
+  // ---------------------------------------------------------------- boot
+  const WAVE_COLOR = { square: '#ff5470', sawtooth: '#ffb347', triangle: '#7cd4fd', sine: '#9d8cff' };
+  const debug = (window.__sonariumDebug = { started: false, triggers: [], errors: [] });
+  window.addEventListener('error', (e) => debug.errors.push(String(e.message)));
+
+  let space;
+  function boot(opts = {}) {
+    if (space) space.dispose();
+    space = Sonarium.create({
+      theme: document.getElementById('ctl-theme').value,
+      ambient: Number(document.getElementById('ctl-ambient').value) / 100,
+      ...opts,
+    });
+    window.space = space;
+    space.on('start', () => { debug.started = true; });
+    space.on('trigger', (d) => {
+      debug.triggers.push({ role: d.profile.role, midi: d.profile.midi, wave: d.profile.wave, art: d.articulation });
+      if (debug.triggers.length > 300) debug.triggers.shift();
+      ripple(d);
+    });
+    return space;
+  }
+  boot();
+
+  document.getElementById('key-label').textContent = Sonarium.siteKey(location.hostname).label;
+
+  // ---------------------------------------------------------------- ripples
+  const ripples = document.getElementById('ripples');
+  function ripple(d) {
+    const el = d.el;
+    if (!el || !el.getBoundingClientRect) return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return;
+    const ring = document.createElement('span');
+    ring.className = 'ripple';
+    const size = Math.min(280, 60 + d.profile.durationS * 160 + Math.max(r.width, r.height) * 0.4);
+    ring.style.cssText = `left:${r.x + r.width / 2}px; top:${r.y + r.height / 2}px; width:${size}px; height:${size}px; border-color:${WAVE_COLOR[d.profile.wave] || '#fff'}; --dur:${0.35 + d.profile.durationS * 0.5}s`;
+    ripples.appendChild(ring);
+    ring.addEventListener('animationend', () => ring.remove());
+  }
+
+  // ---------------------------------------------------------------- controls
+  document.getElementById('ctl-theme').addEventListener('change', () => { boot().start(); });
+  document.getElementById('ctl-ambient').addEventListener('change', () => { boot().start(); });
+  const strumVisible = () => {
+    if (!space || !space.scanner) return;
+    space.strum(space.scanner.visibleElements(), 0.5);
+  };
+  document.getElementById('ctl-strum').addEventListener('click', strumVisible);
+  document.getElementById('cta-strum').addEventListener('click', strumVisible);
+
+  // ---------------------------------------------------------------- inspector
+  const tip = document.getElementById('tip');
+  const inspect = document.getElementById('ctl-inspect');
+  window.addEventListener('pointermove', (e) => {
+    if (!inspect.checked || !space || !space.scanner) { tip.style.display = 'none'; return; }
+    const target = e.target.closest('button, a, h1, h2, h3, input, select, li, img, section, nav');
+    if (!target || target.closest('#bar')) { tip.style.display = 'none'; return; }
+    const p = space.describe(target);
+    if (!p) { tip.style.display = 'none'; return; }
+    tip.innerHTML = Object.entries(p.reasons).map(([k, v]) => `<b>${k}</b> ${v}`).join('<br>');
+    tip.style.display = 'block';
+    tip.style.left = Math.min(window.innerWidth - 360, e.clientX + 16) + 'px';
+    tip.style.top = Math.min(window.innerHeight - tip.offsetHeight - 16, e.clientY + 16) + 'px';
+  }, { passive: true });
+
+  // ---------------------------------------------------------------- shape lab
+  const lab = document.getElementById('lab-shape');
+  const readout = document.getElementById('lab-readout');
+  const ctl = (id) => document.getElementById(id);
+  function applyLab() {
+    const w = Number(ctl('lab-w').value), h = Number(ctl('lab-h').value);
+    const r = Number(ctl('lab-r').value) / 100 * (Math.min(w, h) / 2);
+    lab.style.width = w + 'px';
+    lab.style.height = h + 'px';
+    lab.style.borderRadius = r + 'px';
+    lab.style.left = ctl('lab-x').value + '%';
+    describeLab();
+  }
+  function describeLab() {
+    if (!space || !space.scanner) return;
+    const p = space.describe(lab);
+    if (!p) return;
+    readout.innerHTML =
+      `<b>note</b>     ${Sonarium.midiToNoteName(p.midi)} (${p.freqHz.toFixed(1)} Hz)\n` +
+      `<b>wave</b>     ${p.wave}   <b>attack</b> ${(p.attack * 1000).toFixed(0)} ms   <b>Q</b> ${p.filterQ.toFixed(2)}\n` +
+      `<b>duration</b> ${p.durationS.toFixed(2)} s   <b>filter</b> ${Math.round(p.filterHz)} Hz\n` +
+      `<b>position</b> x ${p.pan.x.toFixed(1)} m, y ${p.pan.y.toFixed(1)} m, z ${p.pan.z.toFixed(1)} m\n` +
+      `<b>why</b>      ${p.reasons.timbre}`;
+  }
+  for (const id of ['lab-w', 'lab-h', 'lab-r', 'lab-x']) ctl(id).addEventListener('input', applyLab);
+  lab.addEventListener('click', () => setTimeout(describeLab, 50));
+  applyLab();
+</script>
+</body>
+</html>
