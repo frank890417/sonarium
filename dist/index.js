@@ -78,9 +78,88 @@ function degreeToMidi(degree, key, stepOffset = 0) {
   return BASE_MIDI + key.root + oct * 12 + pc;
 }
 var midiToFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
+function stepInScale(midi, key, steps) {
+  if (steps === 0) return midi;
+  const pcs = key.scale.map((s) => (s + key.root) % 12);
+  const dir = steps > 0 ? 1 : -1;
+  let m = midi;
+  for (let i = 0; i < Math.abs(steps); i++) {
+    do {
+      m += dir;
+    } while (!pcs.includes((m % 12 + 12) % 12) && m > 12 && m < 120);
+  }
+  return clamp(m, 12, 120);
+}
 function midiToNoteName(m) {
   const pc = (m % 12 + 12) % 12;
   return `${PC_TO_NOTE[pc]}${Math.floor(m / 12) - 1}`;
+}
+
+// src/math/modular.ts
+var modular_exports = {};
+__export(modular_exports, {
+  fmIndex: () => fmIndex,
+  foldCurve: () => foldCurve,
+  foldFromBorder: () => foldFromBorder,
+  lfoFromCss: () => lfoFromCss,
+  massBonusFromFontWeight: () => massBonusFromFontWeight,
+  patchFrom: () => patchFrom,
+  portamentoFromTransition: () => portamentoFromTransition,
+  ribbonSteps: () => ribbonSteps,
+  unisonFromMass: () => unisonFromMass
+});
+function foldFromBorder(borderWidthPx, edge) {
+  const drive = clamp(borderWidthPx / 6, 0, 1) * (0.25 + 0.75 * clamp(edge, 0, 1));
+  return { drive, mix: drive > 0.01 ? 0.25 + 0.55 * drive : 0 };
+}
+var fmIndex = (texture, edge) => 1.5 * clamp(texture, 0, 1) * clamp(edge, 0, 1);
+function unisonFromMass(mass) {
+  const m = clamp(mass, 0, 1);
+  return m >= 0.45 ? { detuneCents: 4 + 10 * m, mix: 0.4 } : { detuneCents: 0, mix: 0 };
+}
+function lfoFromCss(animationS, borderStyle) {
+  if (animationS > 0.05) {
+    return {
+      rateHz: clamp(1 / animationS, 0.08, 8),
+      shape: borderStyle === "dashed" || borderStyle === "dotted" ? "square" : "sine",
+      vibratoCents: 6,
+      tremolo: 0.18,
+      filterDepth: 0.25
+    };
+  }
+  if (borderStyle === "dashed" || borderStyle === "dotted") {
+    return {
+      rateHz: borderStyle === "dotted" ? 7 : 3.5,
+      shape: "square",
+      vibratoCents: 0,
+      tremolo: 0.3,
+      filterDepth: 0.35
+    };
+  }
+  return { rateHz: 0, shape: "sine", vibratoCents: 0, tremolo: 0, filterDepth: 0 };
+}
+var portamentoFromTransition = (transitionS) => clamp(transitionS / 2, 0, 0.25);
+var massBonusFromFontWeight = (weight) => clamp((weight - 400) / 300, 0, 1) * 0.12;
+function patchFrom(matter, visuals) {
+  return {
+    fold: foldFromBorder(visuals.borderWidthPx, matter.edge),
+    fm: { index: fmIndex(matter.texture, matter.edge) },
+    unison: unisonFromMass(matter.mass),
+    lfo: lfoFromCss(visuals.animationS, visuals.borderStyle),
+    portamentoS: portamentoFromTransition(visuals.transitionS)
+  };
+}
+function foldCurve(samples = 2049) {
+  const out = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const x = i / (samples - 1) * 2 - 1;
+    out[i] = Math.sin(2.5 * (Math.PI / 2) * x);
+  }
+  return out;
+}
+function ribbonSteps(dxPx, vw, scaleLen) {
+  const t = clamp(dxPx / (vw * 0.6), -1, 1);
+  return Math.round(t * scaleLen);
 }
 
 // src/math/chroma.ts
@@ -1029,10 +1108,10 @@ var Room = class {
   /** MATTER.md §2.2 — moving through the page moves air. Swells fast, decays in ~450 ms. */
   rush(level) {
     if (!this.rushGain || this.mutedNow) return;
-    const now6 = Tone6.now();
-    this.rushGain.gain.cancelScheduledValues(now6);
-    this.rushGain.gain.rampTo(level, 0.05, now6);
-    this.rushGain.gain.rampTo(0, 0.45, now6 + 0.07);
+    const now7 = Tone6.now();
+    this.rushGain.gain.cancelScheduledValues(now7);
+    this.rushGain.gain.rampTo(level, 0.05, now7);
+    this.rushGain.gain.rampTo(0, 0.45, now7 + 0.07);
   }
   /** I14 — never sound in a background tab. */
   setHidden(hidden) {
@@ -1083,7 +1162,7 @@ function deriveMatter(v) {
   );
   return {
     edge: clamp(1 - v.roundness, 0, 1),
-    mass: clamp(v.sizeT, 0, 1),
+    mass: clamp(v.sizeT + (v.massBonus ?? 0), 0, 1),
     texture,
     air: clamp(Math.min(v.depth, 10) / 10, 0, 1)
   };
@@ -1280,6 +1359,8 @@ function profileOf(el, env) {
   }
   velocityScale = clamp(velocityScale, 0, 1.5);
   const elongation = Math.max(rect.w, rect.h) / Math.max(1, Math.min(rect.w, rect.h));
+  const textish = role === "text" || role === "heading" || role === "link" || role === "button";
+  const fontWeight = textish ? parseInt(cs.fontWeight, 10) || 400 : 400;
   const matter = deriveMatter({
     roundness: round,
     sizeT: st,
@@ -1288,8 +1369,16 @@ function profileOf(el, env) {
     opacity: isNaN(opacity) ? 1 : opacity,
     dashedBorder: cs.borderTopStyle === "dashed" || cs.borderTopStyle === "dotted",
     isMedia: role === "media",
-    backdropBlurPx: parseBackdropBlur(cs)
+    backdropBlurPx: parseBackdropBlur(cs),
+    massBonus: massBonusFromFontWeight(fontWeight)
   });
+  const modVisuals = {
+    animationS: cs.animationName && cs.animationName !== "none" ? firstSeconds(cs.animationDuration) : 0,
+    borderStyle: ["solid", "dashed", "dotted"].includes(cs.borderTopStyle) ? cs.borderTopStyle : "none",
+    borderWidthPx: parseFloat(cs.borderTopWidth) || 0,
+    transitionS: firstSeconds(cs.transitionDuration)
+  };
+  const patch = patchFrom(matter, modVisuals);
   const env0 = envelopeWeave(matter.edge, matter.mass);
   const sub0 = subShimmer(matter.mass);
   const voice = {
@@ -1305,8 +1394,17 @@ function profileOf(el, env) {
     jitterCents: detuneJitterCents(matter.texture),
     envelope: { ...env0, attackS: env0.attackS * attackScaleFromWarmth(chroma.warmth) },
     filter: filterWeave(matter.edge),
-    reverb: reverbWeave(matter.edge, matter.mass, matter.texture)
+    reverb: reverbWeave(matter.edge, matter.mass, matter.texture),
+    patch
   };
+  if (patch.fold.mix > 0.05 || patch.fm.index > 0.05 || patch.lfo.rateHz > 0.01 || patch.unison.mix > 0) {
+    reasons.patch = [
+      patch.fold.mix > 0.05 ? `border drives the wavefolder \xD7${patch.fold.drive.toFixed(2)}` : "",
+      patch.fm.index > 0.05 ? `FM ring ${patch.fm.index.toFixed(2)}` : "",
+      patch.unison.mix > 0 ? `unison +${patch.unison.detuneCents.toFixed(0)}\xA2` : "",
+      patch.lfo.rateHz > 0.01 ? `${patch.lfo.shape} LFO ${patch.lfo.rateHz.toFixed(2)} Hz (${modVisuals.animationS > 0 ? "css animation" : "dashed border"})` : ""
+    ].filter(Boolean).join(" \xB7 ");
+  }
   reasons.chroma = `warmth ${chroma.warmth.toFixed(2)} \xB7 sat ${chroma.saturation.toFixed(2)} \xB7 lum ${chroma.luminance.toFixed(2)} \u2192 ${chroma.warmth > 0.6 ? "eager onset, full body" : chroma.warmth < 0.4 ? "cool, unhurried onset" : "neutral temperament"}${chroma.saturation > 0.5 ? ", vivid spectrum" : ""}`;
   reasons.matter = `edge ${matter.edge.toFixed(2)} \xB7 mass ${matter.mass.toFixed(2)} \xB7 texture ${matter.texture.toFixed(2)} \xB7 air ${matter.air.toFixed(2)} \u2192 ${voice.transient.level > 0.1 ? "clicky" : "soft"}, ${voice.breath.level > 0.05 ? "breathy" : "clean"}, ${voice.subShimmer.interval < 0 ? "chest sub" : "sparkle +8va"}, ${voice.reverb.bloom > 0.5 ? "blooms into the room" : "dry strike"}`;
   const reverbSend = clamp(
@@ -1350,6 +1448,13 @@ function elementChroma(el, cs, role) {
     style = void 0;
   }
   return chromaOf(parseCssColor(getComputedStyle(document.documentElement).backgroundColor));
+}
+function firstSeconds(list) {
+  const first = (list || "").split(",")[0]?.trim() ?? "";
+  if (!first) return 0;
+  const v = parseFloat(first);
+  if (isNaN(v)) return 0;
+  return first.endsWith("ms") ? v / 1e3 : v;
 }
 function parseBackdropBlur(cs) {
   const bf = cs.backdropFilter || cs.webkitBackdropFilter || "";
@@ -1543,25 +1648,43 @@ import * as Tone8 from "tone";
 
 // src/core/matter-voice.ts
 import * as Tone7 from "tone";
+var FOLD_CURVE = foldCurve();
 var MatterVoice = class {
   constructor() {
     this.startedSources = false;
+    this.held = false;
     this.out = new Tone7.Gain(1);
-    const mix = new Tone7.Gain(0.9);
+    this.mix = new Tone7.Gain(0.9);
     this.oscA = new Tone7.Oscillator({ frequency: 220 });
+    this.oscA2 = new Tone7.Oscillator({ frequency: 220 });
     this.oscB = new Tone7.Oscillator({ frequency: 110, type: "sine" });
     this.oscBGain = new Tone7.Gain(0.2);
-    this.oscA.connect(mix);
+    this.foldPre = new Tone7.Gain(0.3);
+    this.foldShaper = new Tone7.WaveShaper(FOLD_CURVE);
+    this.foldWet = new Tone7.Gain(0);
+    this.foldDry = new Tone7.Gain(1);
+    this.oscA.connect(this.foldPre);
+    this.foldPre.connect(this.foldShaper);
+    this.foldShaper.connect(this.foldWet);
+    this.foldWet.connect(this.mix);
+    this.oscA.connect(this.foldDry);
+    this.foldDry.connect(this.mix);
+    this.unisonGain = new Tone7.Gain(0);
+    this.oscA2.connect(this.unisonGain);
+    this.unisonGain.connect(this.mix);
+    this.fmGain = new Tone7.Gain(0);
+    this.oscB.connect(this.fmGain);
+    this.fmGain.connect(this.oscA.frequency);
     this.oscB.connect(this.oscBGain);
-    this.oscBGain.connect(mix);
+    this.oscBGain.connect(this.mix);
     this.breathNoise = new Tone7.Noise("pink");
     this.breathFilter = new Tone7.Filter({ type: "bandpass", frequency: 600, Q: 1.1 });
     this.breathGain = new Tone7.Gain(0);
     this.breathNoise.connect(this.breathFilter);
     this.breathFilter.connect(this.breathGain);
-    this.breathGain.connect(mix);
+    this.breathGain.connect(this.mix);
     this.ampEnv = new Tone7.AmplitudeEnvelope({ attack: 0.01, decay: 0.2, sustain: 0.25, release: 0.3 });
-    mix.connect(this.ampEnv);
+    this.mix.connect(this.ampEnv);
     this.ampEnv.connect(this.out);
     this.burstNoise = new Tone7.Noise("white");
     this.burstFilter = new Tone7.Filter({ type: "highpass", frequency: 3e3 });
@@ -1569,43 +1692,110 @@ var MatterVoice = class {
     this.burstNoise.connect(this.burstFilter);
     this.burstFilter.connect(this.burstEnv);
     this.burstEnv.connect(this.out);
+    this.lfo = new Tone7.LFO({ frequency: 0.5, min: -1, max: 1, type: "sine" });
+    this.lfoVib = new Tone7.Gain(0);
+    this.lfoTrem = new Tone7.Gain(0);
+    this.modFilterOut = new Tone7.Gain(0);
+    this.lfo.connect(this.lfoVib);
+    this.lfo.connect(this.lfoTrem);
+    this.lfo.connect(this.modFilterOut);
+    this.lfoVib.connect(this.oscA.detune);
+    this.lfoVib.connect(this.oscA2.detune);
+    this.lfoTrem.connect(this.mix.gain);
   }
   connect(dest) {
     this.out.connect(dest);
     return this;
   }
-  trigger(t, when) {
-    const v = t.voice;
-    if (!this.startedSources) {
-      this.startedSources = true;
-      this.oscA.start(when);
-      this.oscB.start(when);
-      this.breathNoise.start(when);
-      this.burstNoise.start(when);
+  ensureRunning(when) {
+    if (this.startedSources) return;
+    this.startedSources = true;
+    this.oscA.start(when);
+    this.oscA2.start(when);
+    this.oscB.start(when);
+    this.breathNoise.start(when);
+    this.burstNoise.start(when);
+    this.lfo.start(when);
+  }
+  /** MODULAR.md §4 — idle lanes power down completely; the next trigger restarts in place. */
+  sleep() {
+    if (!this.startedSources || this.held) return;
+    this.startedSources = false;
+    try {
+      this.oscA.stop();
+      this.oscA2.stop();
+      this.oscB.stop();
+      this.breathNoise.stop();
+      this.burstNoise.stop();
+      this.lfo.stop();
+    } catch {
     }
+  }
+  /** Everything both trigger() and gateOn() share: spectrum, patch, pitch, modulation. */
+  applyVoice(t, when, baseCutoffHz) {
+    const v = t.voice;
+    this.ensureRunning(when);
     this.oscA.partials = v.partials;
+    this.oscA2.partials = v.partials;
     const jitter = (Math.random() * 2 - 1) * v.jitterCents;
     this.oscA.detune.setValueAtTime(jitter, when);
-    if (v.glideS > 2e-3) {
+    const glide = v.glideS + v.patch.portamentoS;
+    if (glide > 2e-3 && !this.held) {
       this.oscA.frequency.setValueAtTime(t.freqHz * 0.917, when);
-      this.oscA.frequency.rampTo(t.freqHz, v.glideS, when);
+      this.oscA.frequency.rampTo(t.freqHz, glide, when);
     } else {
       this.oscA.frequency.setValueAtTime(t.freqHz, when);
     }
+    this.oscA2.frequency.setValueAtTime(t.freqHz, when);
+    this.oscA2.detune.setValueAtTime(jitter + v.patch.unison.detuneCents, when);
+    this.unisonGain.gain.rampTo(v.patch.unison.mix, 0.02, when);
     this.oscB.frequency.setValueAtTime(t.freqHz * Math.pow(2, v.subShimmer.interval / 12), when);
     this.oscBGain.gain.rampTo(v.subShimmer.level, 0.02, when);
+    this.foldPre.gain.rampTo(0.3 + v.patch.fold.drive * 1.2, 0.02, when);
+    this.foldWet.gain.rampTo(v.patch.fold.mix, 0.02, when);
+    this.foldDry.gain.rampTo(1 - v.patch.fold.mix * 0.7, 0.02, when);
+    this.fmGain.gain.rampTo(v.patch.fm.index * t.freqHz, 0.02, when);
+    const lfoOn = v.patch.lfo.rateHz > 0.01;
+    this.lfo.frequency.value = Math.max(0.01, v.patch.lfo.rateHz);
+    this.lfo.type = v.patch.lfo.shape;
+    this.lfoVib.gain.rampTo(lfoOn ? v.patch.lfo.vibratoCents : 0, 0.05, when);
+    this.lfoTrem.gain.rampTo(lfoOn ? 0.9 * v.patch.lfo.tremolo : 0, 0.05, when);
+    this.modFilterOut.gain.rampTo(lfoOn ? v.patch.lfo.filterDepth * baseCutoffHz : 0, 0.05, when);
     this.breathFilter.frequency.rampTo(Math.min(8e3, t.freqHz * v.breath.bpRatio), 0.02, when);
     this.breathGain.gain.rampTo(v.breath.level, 0.02, when);
     this.ampEnv.attack = v.envelope.attackS;
     this.ampEnv.decay = v.envelope.decayS;
     this.ampEnv.sustain = v.envelope.sustain;
     this.ampEnv.release = 0.3 * t.releaseScaleBase * v.envelope.releaseScale;
+  }
+  trigger(t, when, baseCutoffHz = 4e3) {
+    this.applyVoice(t, when, baseCutoffHz);
     this.ampEnv.triggerAttackRelease(t.durationS, when, t.velocity);
-    if (v.transient.level > 0.02) {
-      this.burstFilter.frequency.setValueAtTime(v.transient.hpHz, when);
-      this.burstEnv.decay = v.transient.lengthS;
-      this.burstEnv.triggerAttackRelease(v.transient.lengthS, when, t.velocity * v.transient.level);
+    if (t.voice.transient.level > 0.02) {
+      this.burstFilter.frequency.setValueAtTime(t.voice.transient.hpHz, when);
+      this.burstEnv.decay = t.voice.transient.lengthS;
+      this.burstEnv.triggerAttackRelease(t.voice.transient.lengthS, when, t.velocity * t.voice.transient.level);
     }
+  }
+  // ----------------------------------------------------------- ribbon (MODULAR.md §3)
+  gateOn(t, when, baseCutoffHz = 4e3) {
+    this.applyVoice(t, when, baseCutoffHz);
+    this.held = true;
+    this.ampEnv.sustain = Math.max(0.4, t.voice.envelope.sustain);
+    this.ampEnv.triggerAttack(when, t.velocity);
+  }
+  /** Ribbon pitch move — quantized upstream; the portamento IS the glissando feel. */
+  setFreq(freqHz, glideS2, subInterval, fmIndex2) {
+    const g = Math.max(0.015, glideS2);
+    this.oscA.frequency.rampTo(freqHz, g);
+    this.oscA2.frequency.rampTo(freqHz, g);
+    this.oscB.frequency.rampTo(freqHz * Math.pow(2, subInterval / 12), g);
+    this.fmGain.gain.rampTo(fmIndex2 * freqHz, g);
+  }
+  gateOff(when) {
+    this.held = false;
+    this.ampEnv.triggerRelease(when ?? Tone7.now());
+    return this.ampEnv.release;
   }
   releaseTail() {
     return this.ampEnv.release;
@@ -1613,15 +1803,27 @@ var MatterVoice = class {
   dispose() {
     for (const n of [
       this.oscA,
+      this.oscA2,
       this.oscB,
       this.oscBGain,
+      this.fmGain,
+      this.foldPre,
+      this.foldShaper,
+      this.foldWet,
+      this.foldDry,
+      this.unisonGain,
       this.breathNoise,
       this.breathFilter,
       this.breathGain,
       this.burstNoise,
       this.burstFilter,
       this.burstEnv,
+      this.lfo,
+      this.lfoVib,
+      this.lfoTrem,
+      this.modFilterOut,
       this.ampEnv,
+      this.mix,
       this.out
     ]) n.dispose();
   }
@@ -1634,6 +1836,12 @@ var VoicePool = class {
     this.maxVoices = maxVoices;
     this.lanes = [];
     this.maxVoices = clamp(maxVoices, 4, 24);
+    this.sleepTimer = setInterval(() => {
+      const now7 = Tone8.now();
+      for (const lane of this.lanes) {
+        if (lane.synth instanceof MatterVoice && lane.busyUntil < now7 - 30) lane.synth.sleep();
+      }
+    }, 1e4);
   }
   createSynth(kind) {
     switch (kind) {
@@ -1657,18 +1865,19 @@ var VoicePool = class {
     const out = this.backend.createOutput();
     synth.connect(filter);
     filter.connect(out.input);
+    if (synth instanceof MatterVoice) synth.modFilterOut.connect(filter.frequency);
     const lane = { kind, synth, filter, out, busyUntil: 0 };
     this.lanes.push(lane);
     return lane;
   }
   acquire(kind) {
-    const now6 = Tone8.now();
+    const now7 = Tone8.now();
     let candidate = null;
     let oldestSameKind = null;
     let oldestAny = null;
     for (const lane of this.lanes) {
       if (lane.kind === kind) {
-        if (lane.busyUntil <= now6) {
+        if (lane.busyUntil <= now7) {
           candidate = lane;
           break;
         }
@@ -1716,7 +1925,7 @@ var VoicePool = class {
             durationS: dur,
             releaseScaleBase: profile.release / 0.3,
             voice: profile.voice
-          }, t);
+          }, t, baseCutoff);
           lane.busyUntil = t + dur + mv.releaseTail();
           return;
         }
@@ -1758,10 +1967,44 @@ var VoicePool = class {
     }
   }
   get activeCount() {
-    const now6 = Tone8.now();
-    return this.lanes.filter((l) => l.busyUntil > now6).length;
+    const now7 = Tone8.now();
+    return this.lanes.filter((l) => l.busyUntil > now7).length;
+  }
+  /** MODULAR.md §3 — a sustained ribbon voice. Returns null when no matter lane can gate. */
+  sustain(profile, velocity) {
+    const raw = velocity * profile.velocityScale;
+    if (raw <= 0.01) return null;
+    const lane = this.acquire("matter");
+    if (!(lane.synth instanceof MatterVoice)) return null;
+    const mv = lane.synth;
+    const t = Tone8.now();
+    const baseCutoff = Math.max(200, profile.filterHz);
+    lane.filter.Q.rampTo(profile.voice.filter.q, 0.02, t);
+    lane.filter.frequency.cancelScheduledValues(t);
+    lane.filter.frequency.setValueAtTime(Math.min(12e3, baseCutoff * profile.voice.filter.biteAmount), t);
+    lane.filter.frequency.exponentialRampTo(baseCutoff, profile.voice.filter.biteDecayS, t);
+    lane.out.setPlacement(profile, t);
+    mv.gateOn({
+      freqHz: profile.freqHz,
+      velocity: clamp(raw, 0.03, 1),
+      durationS: 9999,
+      releaseScaleBase: profile.release / 0.3,
+      voice: profile.voice
+    }, t, baseCutoff);
+    lane.busyUntil = t + 9999;
+    const voice = profile.voice;
+    return {
+      setFreq(hz, glideS2) {
+        mv.setFreq(hz, glideS2, voice.subShimmer.interval, voice.patch.fm.index);
+      },
+      release() {
+        const tail = mv.gateOff();
+        lane.busyUntil = Tone8.now() + tail;
+      }
+    };
   }
   dispose() {
+    clearInterval(this.sleepTimer);
     for (const lane of this.lanes) {
       lane.synth.dispose();
       lane.filter.dispose();
@@ -1774,26 +2017,48 @@ var VoicePool = class {
 // src/interact/pointer.ts
 var PREVIEW_ROLES = /* @__PURE__ */ new Set(["button", "link", "toggle", "input", "item", "heading", "media", "text"]);
 var HOVER_THROTTLE_MS = 80;
+var SCROLL_SUPPRESS_MS = 250;
+var MOVE_FRESHNESS_MS = 400;
+var MAX_RESOLVE_HOPS = 4;
 function attachPointer(engine) {
   const lastHover = /* @__PURE__ */ new WeakMap();
+  let lastScrollT = -Infinity;
+  let lastMoveT = -Infinity;
   const onMove = (e) => {
+    lastMoveT = performance.now();
     engine.rig?.pointTo(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
   };
+  const onScroll = () => {
+    lastScrollT = performance.now();
+  };
+  const withinHops = (target, resolved) => {
+    let n = target;
+    for (let d = 0; n && d <= MAX_RESOLVE_HOPS; d++) {
+      if (n === resolved) return true;
+      n = n.parentElement;
+    }
+    return false;
+  };
   const onOver = (e) => {
-    const el = engine.scanner?.resolve(e.target);
-    if (!el) return;
+    const now7 = performance.now();
+    if (now7 - lastScrollT < SCROLL_SUPPRESS_MS) return;
+    if (now7 - lastMoveT > MOVE_FRESHNESS_MS) return;
+    const target = e.target;
+    const el = engine.scanner?.resolve(target);
+    if (!el || !target || !withinHops(target, el)) return;
     const profile = engine.scanner.profileFor(el);
     if (!profile || !PREVIEW_ROLES.has(profile.role)) return;
-    const now6 = performance.now();
-    if (now6 - (lastHover.get(el) ?? -Infinity) < HOVER_THROTTLE_MS) return;
-    lastHover.set(el, now6);
+    if (now7 - (lastHover.get(el) ?? -Infinity) < HOVER_THROTTLE_MS) return;
+    lastHover.set(el, now7);
     engine.excite(el, 0.25, "preview");
   };
   window.addEventListener("pointermove", onMove, { passive: true });
   window.addEventListener("pointerover", onOver, { passive: true });
+  window.addEventListener("scroll", onScroll, { passive: true, capture: true });
   return () => {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerover", onOver);
+    window.removeEventListener("scroll", onScroll, { capture: true });
   };
 }
 
@@ -1804,9 +2069,9 @@ function attachActivate(engine) {
   const activate = (target) => {
     const el = engine.scanner?.resolve(target);
     if (!el) return;
-    const now6 = performance.now();
-    if (now6 - (lastHit.get(el) ?? -Infinity) < DEDUPE_MS) return;
-    lastHit.set(el, now6);
+    const now7 = performance.now();
+    if (now7 - (lastHit.get(el) ?? -Infinity) < DEDUPE_MS) return;
+    lastHit.set(el, now7);
     const profile = engine.scanner.profileFor(el);
     if (!profile) return;
     if (profile.role === "toggle") return;
@@ -1845,7 +2110,12 @@ var TICK_THROTTLE_MS = 30;
 var FILL_INTERVALS = [0, 2, 4, 7, 9, 12, 14, 16];
 function attachKeyboard(engine) {
   let lastTick = 0;
+  let lastPointerDownT = -Infinity;
+  const onPointerDown = () => {
+    lastPointerDownT = performance.now();
+  };
   const onFocus = (e) => {
+    if (performance.now() - lastPointerDownT < 500) return;
     const el = engine.scanner?.resolve(e.target);
     if (el) engine.excite(el, 0.35, "preview");
   };
@@ -1853,16 +2123,18 @@ function attachKeyboard(engine) {
     const t = e.target;
     const editable = t instanceof HTMLElement && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable);
     if (!editable) return;
-    const now6 = performance.now();
-    if (now6 - lastTick < TICK_THROTTLE_MS) return;
-    lastTick = now6;
+    const now7 = performance.now();
+    if (now7 - lastTick < TICK_THROTTLE_MS) return;
+    lastTick = now7;
     const len = t.value?.length ?? t.textContent?.length ?? 0;
     const interval = FILL_INTERVALS[Math.min(FILL_INTERVALS.length - 1, Math.floor(len / 4))];
     engine.excite(t, 0.15, "tick", void 0, interval);
   };
+  window.addEventListener("pointerdown", onPointerDown, { passive: true, capture: true });
   window.addEventListener("focusin", onFocus, { passive: true });
   window.addEventListener("keydown", onKeydown, { passive: true });
   return () => {
+    window.removeEventListener("pointerdown", onPointerDown, { capture: true });
     window.removeEventListener("focusin", onFocus);
     window.removeEventListener("keydown", onKeydown);
   };
@@ -1879,11 +2151,11 @@ function attachScroll(engine) {
     requestAnimationFrame(() => {
       scrollQueued = false;
       engine.geometryChanged();
-      const now6 = performance.now();
-      const dt = Math.max(1, now6 - lastT);
+      const now7 = performance.now();
+      const dt = Math.max(1, now7 - lastT);
       const v = Math.abs(window.scrollY - lastY) / dt;
       lastY = window.scrollY;
-      lastT = now6;
+      lastT = now7;
       engine.airRush(airRushGain(v));
     });
   };
@@ -1920,9 +2192,9 @@ function attachMotion(engine) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null || a.y == null || a.z == null) return;
     const magnitude = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.81);
-    const now6 = performance.now();
-    if (magnitude > SHAKE_THRESHOLD && now6 - lastShake > SHAKE_REFRACTORY_MS) {
-      lastShake = now6;
+    const now7 = performance.now();
+    if (magnitude > SHAKE_THRESHOLD && now7 - lastShake > SHAKE_REFRACTORY_MS) {
+      lastShake = now7;
       engine.strum(engine.scanner.visibleElements(), 0.5);
     }
   };
@@ -1945,6 +2217,48 @@ function attachMotion(engine) {
     if (!attached) return;
     window.removeEventListener("deviceorientation", onOrientation);
     window.removeEventListener("devicemotion", onMotion);
+  };
+}
+
+// src/interact/drag.ts
+var START_PX = 14;
+function attachDrag(engine) {
+  let session = null;
+  const onDown = (e) => {
+    if (!e.isPrimary) return;
+    const el = engine.scanner?.resolve(e.target);
+    if (!el) return;
+    const p = engine.scanner.profileFor(el);
+    if (!p || p.role === "container" || p.role === "text") return;
+    session = { x0: e.clientX, el, handle: null };
+  };
+  const onMove = (e) => {
+    if (!session) return;
+    const dx = e.clientX - session.x0;
+    if (!session.handle) {
+      if (Math.abs(dx) < START_PX) return;
+      session.handle = engine.ribbon(session.el);
+      if (!session.handle) {
+        session = null;
+        return;
+      }
+    }
+    session.handle.move(dx);
+  };
+  const end = () => {
+    session?.handle?.release();
+    session = null;
+  };
+  window.addEventListener("pointerdown", onDown, { passive: true });
+  window.addEventListener("pointermove", onMove, { passive: true });
+  window.addEventListener("pointerup", end, { passive: true });
+  window.addEventListener("pointercancel", end, { passive: true });
+  return () => {
+    end();
+    window.removeEventListener("pointerdown", onDown);
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
   };
 }
 
@@ -2056,7 +2370,8 @@ var Engine = class {
       attachPointer(this),
       attachActivate(this),
       attachKeyboard(this),
-      attachScroll(this)
+      attachScroll(this),
+      attachDrag(this)
     );
     if (this.opts.motion) this.detachers.push(attachMotion(this));
     const onVis = () => this.room?.setHidden(document.hidden);
@@ -2116,6 +2431,32 @@ var Engine = class {
     this.rig.start();
     this.pool = new VoicePool(this.backend, this.opts.maxVoices);
   }
+  /**
+   * MODULAR.md §3 — the ribbon controller: press-and-drag turns an element into a sustained
+   * voice swept across scale degrees (quantized — the glide between steps is the glissando).
+   */
+  ribbon(el) {
+    if (this.state !== "running" || this.muted || !this.pool) return null;
+    const target = this.scanner.resolve(el) ?? el;
+    const profile = this.scanner.profileFor(target);
+    if (!profile) return null;
+    const handle = this.pool.sustain(profile, 0.6);
+    if (!handle) return null;
+    this.emit("trigger", { el: target, profile, velocity: 0.6, articulation: "ribbon" });
+    const key = this.opts.key;
+    const glide = 0.03 + profile.voice.patch.portamentoS;
+    let lastMidi = profile.midi;
+    return {
+      move: (dxPx) => {
+        const midi = stepInScale(profile.midi, key, ribbonSteps(dxPx, this.env.vw, key.scale.length));
+        if (midi !== lastMidi) {
+          lastMidi = midi;
+          handle.setFreq(midiToFreq(midi), glide);
+        }
+      },
+      release: () => handle.release()
+    };
+  }
   /** MATTER.md §2.2 — scroll drivers report air movement; rides the room-tone noise. */
   airRush(level) {
     if (this.state !== "running" || this.muted || level <= 5e-3) return;
@@ -2174,10 +2515,10 @@ var Engine = class {
     let profile = this.scanner.profileFor(target);
     if (!profile) return;
     if (articulation !== "motif" && articulation !== "echo" && articulation !== "phrase" && articulation !== "whisper") {
-      const now6 = performance.now();
-      const a = this.activity.get(target) ?? { c: 0, t: now6 };
-      a.c = decayCount(a.c, now6 - a.t) + 1;
-      a.t = now6;
+      const now7 = performance.now();
+      const a = this.activity.get(target) ?? { c: 0, t: now7 };
+      a.c = decayCount(a.c, now7 - a.t) + 1;
+      a.t = now7;
       this.activity.set(target, a);
       velocity *= duckFactor(a.c - 1);
     }
@@ -2263,7 +2604,7 @@ var Engine = class {
 };
 
 // src/index.ts
-var version = "0.4.0";
+var version = "0.5.0";
 function create(options = {}) {
   return new Engine(options);
 }
@@ -2311,11 +2652,13 @@ export {
   matter_exports as matter,
   midiToFreq,
   midiToNoteName,
+  modular_exports as modular,
   parseKey,
   pulse_exports as pulse,
   rotationMatrix,
   siteKey,
   sphere_exports as sphereMapping,
+  stepInScale,
   unitVector,
   version
 };

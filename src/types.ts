@@ -15,7 +15,7 @@ export type SynthKind = 'matter' | 'synth' | 'fm' | 'pluck' | 'membrane' | 'nois
 
 export type Articulation =
   | 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif'
-  | 'echo' | 'phrase'
+  | 'echo' | 'phrase' | 'ribbon'
 
 export interface Rect {
   x: number
@@ -58,6 +58,14 @@ export interface MatterVoiceParams {
   envelope: { attackS: number; decayS: number; sustain: number; releaseScale: number }
   filter: { q: number; biteAmount: number; biteDecayS: number }
   reverb: { sendScale: number; sendCutoffHz: number; bloom: number; extentBonus: number }
+  /** The modular patch (MODULAR.md): CSS plugs the cables. */
+  patch: {
+    fold: { drive: number; mix: number }
+    fm: { index: number }
+    unison: { detuneCents: number; mix: number }
+    lfo: { rateHz: number; shape: 'sine' | 'square'; vibratoCents: number; tremolo: number; filterDepth: number }
+    portamentoS: number
+  }
 }
 
 /** The contract between page reading (L1) and the audio substrate (L0). See ARCHITECTURE.md §2. */

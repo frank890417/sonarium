@@ -27,12 +27,20 @@ export interface VoiceBuses {
 
 export class VoicePool {
   private lanes: Lane[] = []
+  private sleepTimer: ReturnType<typeof setInterval>
 
   constructor(
     private backend: SpatialBackend,
     private maxVoices: number,
   ) {
     this.maxVoices = clamp(maxVoices, 4, 24)
+    // MODULAR.md §4 — idle matter lanes power down (silent page ⇒ ~zero steady-state CPU).
+    this.sleepTimer = setInterval(() => {
+      const now = Tone.now()
+      for (const lane of this.lanes) {
+        if (lane.synth instanceof MatterVoice && lane.busyUntil < now - 30) lane.synth.sleep()
+      }
+    }, 10000)
   }
 
   private createSynth(kind: SynthKind): AnySynth {
@@ -58,6 +66,8 @@ export class VoicePool {
     const out = this.backend.createOutput()
     synth.connect(filter)
     filter.connect(out.input)
+    // The LFO's filter-wobble tap (MODULAR.md M4/M5) modulates the lane filter additively.
+    if (synth instanceof MatterVoice) synth.modFilterOut.connect(filter.frequency)
     const lane: Lane = { kind, synth, filter, out, busyUntil: 0 }
     this.lanes.push(lane)
     return lane
@@ -120,7 +130,7 @@ export class VoicePool {
             durationS: dur,
             releaseScaleBase: profile.release / 0.3,
             voice: profile.voice,
-          }, t)
+          }, t, baseCutoff)
           lane.busyUntil = t + dur + mv.releaseTail()
           return
         }
@@ -166,7 +176,42 @@ export class VoicePool {
     return this.lanes.filter((l) => l.busyUntil > now).length
   }
 
+  /** MODULAR.md §3 — a sustained ribbon voice. Returns null when no matter lane can gate. */
+  sustain(profile: SonicProfile, velocity: number): { setFreq(hz: number, glideS: number): void; release(): void } | null {
+    const raw = velocity * profile.velocityScale
+    if (raw <= 0.01) return null
+    const lane = this.acquire('matter')
+    if (!(lane.synth instanceof MatterVoice)) return null
+    const mv = lane.synth
+    const t = Tone.now()
+    const baseCutoff = Math.max(200, profile.filterHz)
+    lane.filter.Q.rampTo(profile.voice.filter.q, 0.02, t)
+    lane.filter.frequency.cancelScheduledValues(t)
+    lane.filter.frequency.setValueAtTime(Math.min(12000, baseCutoff * profile.voice.filter.biteAmount), t)
+    lane.filter.frequency.exponentialRampTo(baseCutoff, profile.voice.filter.biteDecayS, t)
+    lane.out.setPlacement(profile, t)
+    mv.gateOn({
+      freqHz: profile.freqHz,
+      velocity: clamp(raw, 0.03, 1),
+      durationS: 9999,
+      releaseScaleBase: profile.release / 0.3,
+      voice: profile.voice,
+    }, t, baseCutoff)
+    lane.busyUntil = t + 9999
+    const voice = profile.voice
+    return {
+      setFreq(hz: number, glideS: number) {
+        mv.setFreq(hz, glideS, voice.subShimmer.interval, voice.patch.fm.index)
+      },
+      release() {
+        const tail = mv.gateOff()
+        lane.busyUntil = Tone.now() + tail
+      },
+    }
+  }
+
   dispose(): void {
+    clearInterval(this.sleepTimer)
     for (const lane of this.lanes) {
       lane.synth.dispose()
       lane.filter.dispose()

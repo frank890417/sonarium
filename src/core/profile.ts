@@ -18,6 +18,7 @@ import {
   attackScaleFromWarmth, brightnessFromLuminance, chromaOf, parseCssColor,
   richnessFromSaturation, subBonusFromWarmth, velocityFromLuminance, type Chroma,
 } from '../math/chroma'
+import { massBonusFromFontWeight, patchFrom, type ModularVisuals } from '../math/modular'
 import { directivityFromRoundness, extentFromSize, sphereFromRect } from '../spatial/sphere'
 import { directivityFilterScale } from '../spatial/perceptual'
 import { DEG } from '../spatial/sh'
@@ -197,6 +198,8 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
 
   // The Matter weave (MATTER.md §2) — one material, many co-varying cues.
   const elongation = Math.max(rect.w, rect.h) / Math.max(1, Math.min(rect.w, rect.h))
+  const textish = role === 'text' || role === 'heading' || role === 'link' || role === 'button'
+  const fontWeight = textish ? parseInt(cs.fontWeight, 10) || 400 : 400
   const matter = deriveMatter({
     roundness: round,
     sizeT: st,
@@ -206,7 +209,17 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
     dashedBorder: cs.borderTopStyle === 'dashed' || cs.borderTopStyle === 'dotted',
     isMedia: role === 'media',
     backdropBlurPx: parseBackdropBlur(cs),
+    massBonus: massBonusFromFontWeight(fontWeight),
   })
+
+  // The modular patch (MODULAR.md §1) — CSS plugs the cables.
+  const modVisuals: ModularVisuals = {
+    animationS: cs.animationName && cs.animationName !== 'none' ? firstSeconds(cs.animationDuration) : 0,
+    borderStyle: (['solid', 'dashed', 'dotted'].includes(cs.borderTopStyle) ? cs.borderTopStyle : 'none') as ModularVisuals['borderStyle'],
+    borderWidthPx: parseFloat(cs.borderTopWidth) || 0,
+    transitionS: firstSeconds(cs.transitionDuration),
+  }
+  const patch = patchFrom(matter, modVisuals)
   // Chroma tints the matter (CH3–CH5) — never a second instrument.
   const env0 = envelopeWeave(matter.edge, matter.mass)
   const sub0 = subShimmer(matter.mass)
@@ -224,6 +237,15 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
     envelope: { ...env0, attackS: env0.attackS * attackScaleFromWarmth(chroma.warmth) },
     filter: filterWeave(matter.edge),
     reverb: reverbWeave(matter.edge, matter.mass, matter.texture),
+    patch,
+  }
+  if (patch.fold.mix > 0.05 || patch.fm.index > 0.05 || patch.lfo.rateHz > 0.01 || patch.unison.mix > 0) {
+    reasons.patch = [
+      patch.fold.mix > 0.05 ? `border drives the wavefolder ×${patch.fold.drive.toFixed(2)}` : '',
+      patch.fm.index > 0.05 ? `FM ring ${patch.fm.index.toFixed(2)}` : '',
+      patch.unison.mix > 0 ? `unison +${patch.unison.detuneCents.toFixed(0)}¢` : '',
+      patch.lfo.rateHz > 0.01 ? `${patch.lfo.shape} LFO ${patch.lfo.rateHz.toFixed(2)} Hz (${modVisuals.animationS > 0 ? 'css animation' : 'dashed border'})` : '',
+    ].filter(Boolean).join(' · ')
   }
   reasons.chroma = `warmth ${chroma.warmth.toFixed(2)} · sat ${chroma.saturation.toFixed(2)} · lum ${chroma.luminance.toFixed(2)} → ${chroma.warmth > 0.6 ? 'eager onset, full body' : chroma.warmth < 0.4 ? 'cool, unhurried onset' : 'neutral temperament'}${chroma.saturation > 0.5 ? ', vivid spectrum' : ''}`
   reasons.matter = `edge ${matter.edge.toFixed(2)} · mass ${matter.mass.toFixed(2)} · texture ${matter.texture.toFixed(2)} · air ${matter.air.toFixed(2)} → ${voice.transient.level > 0.1 ? 'clicky' : 'soft'}, ${voice.breath.level > 0.05 ? 'breathy' : 'clean'}, ${voice.subShimmer.interval < 0 ? 'chest sub' : 'sparkle +8va'}, ${voice.reverb.bloom > 0.5 ? 'blooms into the room' : 'dry strike'}`
@@ -262,6 +284,15 @@ function elementChroma(el: Element, cs: CSSStyleDeclaration, role: Role): Chroma
     style = undefined
   }
   return chromaOf(parseCssColor(getComputedStyle(document.documentElement).backgroundColor))
+}
+
+/** First duration in a comma list ("2s, 0.5s" → 2; "250ms" → 0.25). */
+function firstSeconds(list: string): number {
+  const first = (list || '').split(',')[0]?.trim() ?? ''
+  if (!first) return 0
+  const v = parseFloat(first)
+  if (isNaN(v)) return 0
+  return first.endsWith('ms') ? v / 1000 : v
 }
 
 function parseBackdropBlur(cs: CSSStyleDeclaration): number {

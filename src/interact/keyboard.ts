@@ -10,8 +10,16 @@ const FILL_INTERVALS = [0, 2, 4, 7, 9, 12, 14, 16] as const
 
 export function attachKeyboard(engine: Engine): () => void {
   let lastTick = 0
+  let lastPointerDownT = -Infinity
+
+  // Clicking focuses too — that focus must stay silent or every click sounds twice
+  // (ghost-trigger fix, v0.5). Only keyboard-driven focus (Tab) previews.
+  const onPointerDown = () => {
+    lastPointerDownT = performance.now()
+  }
 
   const onFocus = (e: FocusEvent) => {
+    if (performance.now() - lastPointerDownT < 500) return
     const el = engine.scanner?.resolve(e.target as Element | null)
     if (el) engine.excite(el, 0.35, 'preview')
   }
@@ -29,9 +37,11 @@ export function attachKeyboard(engine: Engine): () => void {
     engine.excite(t, 0.15, 'tick', undefined, interval)
   }
 
+  window.addEventListener('pointerdown', onPointerDown, { passive: true, capture: true })
   window.addEventListener('focusin', onFocus, { passive: true })
   window.addEventListener('keydown', onKeydown, { passive: true })
   return () => {
+    window.removeEventListener('pointerdown', onPointerDown, { capture: true })
     window.removeEventListener('focusin', onFocus)
     window.removeEventListener('keydown', onKeydown)
   }

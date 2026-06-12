@@ -3,7 +3,8 @@
  * Lifecycle: idle → armed → running ⇄ muted → disposed (§3).
  */
 import * as Tone from 'tone'
-import { SCALES, parseKey, siteKey, type SiteKey } from '../math/scales'
+import { SCALES, midiToFreq, parseKey, siteKey, stepInScale, type SiteKey } from '../math/scales'
+import { ribbonSteps } from '../math/modular'
 import { clamp } from '../math/util'
 import {
   chromaOf, modeFromPalette, pagePalette, parseCssColor, roomToneScaleFromWarmth,
@@ -30,6 +31,7 @@ import { attachActivate } from '../interact/activate'
 import { attachKeyboard } from '../interact/keyboard'
 import { attachScroll } from '../interact/scroll'
 import { attachMotion } from '../interact/motion'
+import { attachDrag } from '../interact/drag'
 
 interface ResolvedOptions {
   root: Element
@@ -195,6 +197,7 @@ export class Engine {
       attachActivate(this),
       attachKeyboard(this),
       attachScroll(this),
+      attachDrag(this),
     )
     if (this.opts.motion) this.detachers.push(attachMotion(this))
 
@@ -260,6 +263,33 @@ export class Engine {
     this.rig = new ListenerRig(this.opts.listener)
     this.rig.start()
     this.pool = new VoicePool(this.backend, this.opts.maxVoices)
+  }
+
+  /**
+   * MODULAR.md §3 — the ribbon controller: press-and-drag turns an element into a sustained
+   * voice swept across scale degrees (quantized — the glide between steps is the glissando).
+   */
+  ribbon(el: Element): { move(dxPx: number): void; release(): void } | null {
+    if (this.state !== 'running' || this.muted || !this.pool) return null
+    const target = this.scanner.resolve(el) ?? el
+    const profile = this.scanner.profileFor(target)
+    if (!profile) return null
+    const handle = this.pool.sustain(profile, 0.6)
+    if (!handle) return null
+    this.emit('trigger', { el: target, profile, velocity: 0.6, articulation: 'ribbon' } satisfies TriggerDetail)
+    const key = this.opts.key
+    const glide = 0.03 + profile.voice.patch.portamentoS
+    let lastMidi = profile.midi
+    return {
+      move: (dxPx: number) => {
+        const midi = stepInScale(profile.midi, key, ribbonSteps(dxPx, this.env.vw, key.scale.length))
+        if (midi !== lastMidi) {
+          lastMidi = midi
+          handle.setFreq(midiToFreq(midi), glide)
+        }
+      },
+      release: () => handle.release(),
+    }
   }
 
   /** MATTER.md §2.2 — scroll drivers report air movement; rides the room-tone noise. */

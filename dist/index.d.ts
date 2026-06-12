@@ -19,6 +19,11 @@ declare function parseKey(spec: string): SiteKey | null;
  */
 declare function degreeToMidi(degree: number, key: SiteKey, stepOffset?: number): number;
 declare const midiToFreq: (m: number) => number;
+/**
+ * Walk N scale steps up/down from a midi note, staying on the key's pitch classes
+ * (the ribbon controller's quantizer — MODULAR.md §3; Invariant #2 holds under drag).
+ */
+declare function stepInScale(midi: number, key: SiteKey, steps: number): number;
 declare function midiToNoteName(m: number): string;
 
 interface Rgb {
@@ -91,7 +96,7 @@ declare namespace chroma {
 type Wave = 'sine' | 'triangle' | 'sawtooth' | 'square';
 type Role = 'toggle' | 'button' | 'link' | 'input' | 'heading' | 'media' | 'item' | 'container' | 'text';
 type SynthKind = 'matter' | 'synth' | 'fm' | 'pluck' | 'membrane' | 'noise';
-type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif' | 'echo' | 'phrase';
+type Articulation = 'hit' | 'preview' | 'tick' | 'strum' | 'whisper' | 'toggle-on' | 'toggle-off' | 'motif' | 'echo' | 'phrase' | 'ribbon';
 interface Rect {
     x: number;
     y: number;
@@ -158,6 +163,28 @@ interface MatterVoiceParams {
         sendCutoffHz: number;
         bloom: number;
         extentBonus: number;
+    };
+    /** The modular patch (MODULAR.md): CSS plugs the cables. */
+    patch: {
+        fold: {
+            drive: number;
+            mix: number;
+        };
+        fm: {
+            index: number;
+        };
+        unison: {
+            detuneCents: number;
+            mix: number;
+        };
+        lfo: {
+            rateHz: number;
+            shape: 'sine' | 'square';
+            vibratoCents: number;
+            tremolo: number;
+            filterDepth: number;
+        };
+        portamentoS: number;
     };
 }
 /** The contract between page reading (L1) and the audio substrate (L0). See ARCHITECTURE.md §2. */
@@ -266,6 +293,7 @@ declare class VoicePool {
     private backend;
     private maxVoices;
     private lanes;
+    private sleepTimer;
     constructor(backend: SpatialBackend, maxVoices: number);
     private createSynth;
     private createLane;
@@ -273,6 +301,11 @@ declare class VoicePool {
     /** Configure a lane from the profile, then sound it. `when` lets strums schedule ahead. */
     trigger(profile: SonicProfile, velocity: number, when?: number): void;
     get activeCount(): number;
+    /** MODULAR.md §3 — a sustained ribbon voice. Returns null when no matter lane can gate. */
+    sustain(profile: SonicProfile, velocity: number): {
+        setFreq(hz: number, glideS: number): void;
+        release(): void;
+    } | null;
     dispose(): void;
 }
 
@@ -516,6 +549,14 @@ declare class Engine {
      * browser, fall back to the v0.1 per-voice panner world rather than staying silent.
      */
     private buildAudioGraph;
+    /**
+     * MODULAR.md §3 — the ribbon controller: press-and-drag turns an element into a sustained
+     * voice swept across scale degrees (quantized — the glide between steps is the glissando).
+     */
+    ribbon(el: Element): {
+        move(dxPx: number): void;
+        release(): void;
+    } | null;
     /** MATTER.md §2.2 — scroll drivers report air movement; rides the room-tone noise. */
     airRush(level: number): void;
     /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
@@ -646,6 +687,8 @@ interface MatterVisuals {
     dashedBorder: boolean;
     isMedia: boolean;
     backdropBlurPx: number;
+    /** MODULAR.md M7 — typography enters the weave (bold text carries weight). Default 0. */
+    massBonus?: number;
 }
 declare function deriveMatter(v: MatterVisuals): Matter;
 declare const PARTIAL_COUNT = 24;
@@ -790,6 +833,75 @@ declare namespace pulse {
   export { pulse_DUCK_RECOVERY_MS as DUCK_RECOVERY_MS, pulse_ECHO_MIN_AHEAD_S as ECHO_MIN_AHEAD_S, pulse_ECHO_TRANSPOSE as ECHO_TRANSPOSE, pulse_ECHO_VELOCITY_SCALE as ECHO_VELOCITY_SCALE, pulse_PHRASE_MAX_NOTES as PHRASE_MAX_NOTES, pulse_PHRASE_MIN_NOTES as PHRASE_MIN_NOTES, pulse_PHRASE_PROBABILITY as PHRASE_PROBABILITY, pulse_decayCount as decayCount, pulse_duckFactor as duckFactor, pulse_echoGridS as echoGridS, pulse_nextGridOffset as nextGridOffset, pulse_phraseWindow as phraseWindow, pulse_readingOrderKey as readingOrderKey, pulse_secondsPerBeat as secondsPerBeat, pulse_strumStepS as strumStepS, pulse_tempoFromPage as tempoFromPage };
 }
 
+interface ModularVisuals {
+    /** seconds; 0 = no animation */
+    animationS: number;
+    borderStyle: 'solid' | 'dashed' | 'dotted' | 'none';
+    borderWidthPx: number;
+    /** seconds; 0 = no transition */
+    transitionS: number;
+}
+interface PatchParams {
+    fold: {
+        drive: number;
+        mix: number;
+    };
+    fm: {
+        index: number;
+    };
+    unison: {
+        detuneCents: number;
+        mix: number;
+    };
+    lfo: {
+        rateHz: number;
+        shape: 'sine' | 'square';
+        vibratoCents: number;
+        tremolo: number;
+        filterDepth: number;
+    };
+    portamentoS: number;
+}
+/** M1 — heavy borders saturate: drive ∈ [0,1], mix follows. */
+declare function foldFromBorder(borderWidthPx: number, edge: number): PatchParams['fold'];
+/** M2 — rough sharp surfaces ring metallic (audio-rate FM index, × carrier Hz in-voice). */
+declare const fmIndex: (texture: number, edge: number) => number;
+/** M3 — big elements are thick, not just low. */
+declare function unisonFromMass(mass: number): PatchParams['unison'];
+/** M4/M5 — the LFO patch bay: animation owns it; dashed/dotted borders chop; else idle. */
+declare function lfoFromCss(animationS: number, borderStyle: ModularVisuals['borderStyle']): PatchParams['lfo'];
+/** M6 — elements that ease visually ease in pitch. Seconds added to the glide. */
+declare const portamentoFromTransition: (transitionS: number) => number;
+/** M7 — typography enters the weave: bold text carries weight (MASS bonus). */
+declare const massBonusFromFontWeight: (weight: number) => number;
+declare function patchFrom(matter: {
+    edge: number;
+    mass: number;
+    texture: number;
+}, visuals: ModularVisuals): PatchParams;
+/**
+ * The wavefolder transfer curve: y = sin(2.5·(π/2)·x). Near-linear for quiet signals,
+ * folding for hot ones — the amp envelope sweeps the spectrum through the fold every note.
+ */
+declare function foldCurve(samples?: number): Float32Array;
+/** Drag-glissando ribbon (MODULAR.md §3): horizontal travel → scale-step offset, ±1 octave. */
+declare function ribbonSteps(dxPx: number, vw: number, scaleLen: number): number;
+
+type modular_ModularVisuals = ModularVisuals;
+type modular_PatchParams = PatchParams;
+declare const modular_fmIndex: typeof fmIndex;
+declare const modular_foldCurve: typeof foldCurve;
+declare const modular_foldFromBorder: typeof foldFromBorder;
+declare const modular_lfoFromCss: typeof lfoFromCss;
+declare const modular_massBonusFromFontWeight: typeof massBonusFromFontWeight;
+declare const modular_patchFrom: typeof patchFrom;
+declare const modular_portamentoFromTransition: typeof portamentoFromTransition;
+declare const modular_ribbonSteps: typeof ribbonSteps;
+declare const modular_unisonFromMass: typeof unisonFromMass;
+declare namespace modular {
+  export { type modular_ModularVisuals as ModularVisuals, type modular_PatchParams as PatchParams, modular_fmIndex as fmIndex, modular_foldCurve as foldCurve, modular_foldFromBorder as foldFromBorder, modular_lfoFromCss as lfoFromCss, modular_massBonusFromFontWeight as massBonusFromFontWeight, modular_patchFrom as patchFrom, modular_portamentoFromTransition as portamentoFromTransition, modular_ribbonSteps as ribbonSteps, modular_unisonFromMass as unisonFromMass };
+}
+
 /**
  * Pure spherical-harmonic encoding — SPATIAL.md §1–2. AmbiX: ACN order [W, Y, Z, X],
  * SN3D normalization, +x forward, +y left, +z up, +azimuth left. No DOM, no Tone.
@@ -874,7 +986,7 @@ declare namespace sphere {
  * Docs: https://github.com/frank890417/sonarium — start with docs/PLAN.md.
  */
 
-declare const version = "0.4.0";
+declare const version = "0.5.0";
 
 /**
  * Create a Sonarium instance. Safe to call before any user gesture: audio arms itself and
@@ -882,4 +994,4 @@ declare const version = "0.4.0";
  */
 declare function create(options?: SonariumOptions): Engine;
 
-export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, chroma, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, matter, midiToFreq, midiToNoteName, parseKey, pulse, rotationMatrix, siteKey, sphere as sphereMapping, unitVector, version };
+export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, chroma, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, matter, midiToFreq, midiToNoteName, modular, parseKey, pulse, rotationMatrix, siteKey, sphere as sphereMapping, stepInScale, unitVector, version };

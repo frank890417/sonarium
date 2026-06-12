@@ -26,6 +26,8 @@ export interface MatterVisuals {
   dashedBorder: boolean
   isMedia: boolean
   backdropBlurPx: number
+  /** MODULAR.md M7 — typography enters the weave (bold text carries weight). Default 0. */
+  massBonus?: number
 }
 
 export function deriveMatter(v: MatterVisuals): Matter {
@@ -40,7 +42,7 @@ export function deriveMatter(v: MatterVisuals): Matter {
   )
   return {
     edge: clamp(1 - v.roundness, 0, 1),
-    mass: clamp(v.sizeT, 0, 1),
+    mass: clamp(v.sizeT + (v.massBonus ?? 0), 0, 1),
     texture,
     air: clamp(Math.min(v.depth, 10) / 10, 0, 1),
   }

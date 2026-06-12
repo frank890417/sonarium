@@ -1,6 +1,6 @@
 {
   "name": "sonarium",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Drop-in acoustic UX — one script tag turns any webpage into a spatial sound field. Layout becomes a stereo stage, geometry becomes timbre (Kiki/Bouba), the DOM tree becomes depth and harmony, the viewport becomes a room.",
   "type": "module",
   "main": "./dist/index.js",
@@ -22,7 +22,11 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "serve": "vite"
+    "serve": "vite",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "audio",

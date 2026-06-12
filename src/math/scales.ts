@@ -67,6 +67,23 @@ export function degreeToMidi(degree: number, key: SiteKey, stepOffset = 0): numb
 
 export const midiToFreq = (m: number): number => 440 * Math.pow(2, (m - 69) / 12)
 
+/**
+ * Walk N scale steps up/down from a midi note, staying on the key's pitch classes
+ * (the ribbon controller's quantizer — MODULAR.md §3; Invariant #2 holds under drag).
+ */
+export function stepInScale(midi: number, key: SiteKey, steps: number): number {
+  if (steps === 0) return midi
+  const pcs = key.scale.map((s) => (s + key.root) % 12)
+  const dir = steps > 0 ? 1 : -1
+  let m = midi
+  for (let i = 0; i < Math.abs(steps); i++) {
+    do {
+      m += dir
+    } while (!pcs.includes(((m % 12) + 12) % 12) && m > 12 && m < 120)
+  }
+  return clamp(m, 12, 120)
+}
+
 export function midiToNoteName(m: number): string {
   const pc = ((m % 12) + 12) % 12
   return `${PC_TO_NOTE[pc]}${Math.floor(m / 12) - 1}`
