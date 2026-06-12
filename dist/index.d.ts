@@ -31,6 +31,25 @@ interface Rect {
     w: number;
     h: number;
 }
+/** Spherical source properties — the 聲球 (SPATIAL.md §2, §4). */
+interface SphereProps {
+    /** Radians, AmbiX convention: +azimuth = left. */
+    azimuth: number;
+    /** Radians, + = up. */
+    elevation: number;
+    /** Apparent angular size σ ∈ [0,1] — point source … wraps around the listener. */
+    extent: number;
+    /** δ ∈ [0,1]: 1 = focused beam at the listener, 0 = omni radiator. */
+    directivity: number;
+}
+/** The spat5.oper surface (SPATIAL.md §5) — all ∈ [0,1], perceptually monotonic. */
+interface PerceptualFactors {
+    presence: number;
+    roomPresence: number;
+    envelopment: number;
+    warmth: number;
+    brilliance: number;
+}
 /** The contract between page reading (L1) and the audio substrate (L0). See ARCHITECTURE.md §2. */
 interface SonicProfile {
     role: Role;
@@ -40,6 +59,7 @@ interface SonicProfile {
         y: number;
         z: number;
     };
+    sphere: SphereProps;
     midi: number;
     freqHz: number;
     degree: number;
@@ -90,6 +110,13 @@ interface SonariumOptions {
     maxVoices?: number;
     /** 'hrtf' (default) or 'equalpower' for low-end devices. */
     panning?: 'hrtf' | 'equalpower';
+    /**
+     * Spatial engine (SPATIAL.md): 'ambisonic' (default) encodes everything into one rotatable
+     * FOA field, Spat-style; 'panner' is the v0.1 per-voice HRTF path (also the auto-fallback).
+     */
+    spatial?: 'ambisonic' | 'panner';
+    /** Spat-style perceptual factors (presence, roomPresence, envelopment, warmth, brilliance). */
+    perceptual?: Partial<PerceptualFactors>;
     /** Reverb: 'auto' sizes the room from viewport width, or a fixed decay in seconds. */
     reverb?: 'auto' | number;
     /** Respect prefers-reduced-motion by softening output. Default true. */
@@ -101,6 +128,157 @@ interface TriggerDetail {
     profile: SonicProfile;
     velocity: number;
     articulation: Articulation;
+}
+
+declare const DEFAULT_FACTORS: PerceptualFactors;
+
+/**
+ * L0 Acoustic Substrate — VoicePool (ARCHITECTURE.md §4).
+ * Profiles are data; voices are rented lanes configured at trigger time. Spatial placement is
+ * delegated to the active SpatialBackend (ambisonic field or per-voice panners — SPATIAL.md §6).
+ * Imports Tone only; never reads the DOM.
+ */
+
+interface VoiceBuses {
+    dryIn: Tone.InputNode;
+    wetIn: Tone.InputNode;
+}
+declare class VoicePool {
+    private backend;
+    private maxVoices;
+    private lanes;
+    constructor(backend: SpatialBackend, maxVoices: number);
+    private createSynth;
+    private createLane;
+    private acquire;
+    /** Configure a lane from the profile, then sound it. `when` lets strums schedule ahead. */
+    trigger(profile: SonicProfile, velocity: number, when?: number): void;
+    get activeCount(): number;
+    dispose(): void;
+}
+
+/**
+ * L0 Acoustic Substrate — the Room: master chain (spatial input → warmth/brilliance shelves →
+ * volume → limiter), viewport-sized reverb (S7/S8), ambience (I13), visibility fading (I14),
+ * mute. In 'panner' mode it also owns the classic dry/wet routing; in 'ambisonic' mode the
+ * AmbisonicBackend consumes `reverb` and `spatialIn` directly (SPATIAL.md §6). Imports Tone only.
+ */
+
+interface RoomOptions {
+    volumeDb: number;
+    reverb: 'auto' | number;
+    ambient: number;
+    mode: 'panner' | 'ambisonic';
+}
+declare class Room {
+    private opts;
+    /** Classic v0.1 buses — meaningful in 'panner' mode (dryIn = spatialIn, wetIn = reverb). */
+    readonly buses: VoiceBuses;
+    /** Everything audible enters here (gets the perceptual EQ + limiter). */
+    readonly spatialIn: Tone.Gain;
+    readonly reverb: Tone.Reverb;
+    private master;
+    private limiter;
+    private lowShelf;
+    private highShelf;
+    private wetGain;
+    private noise;
+    private noiseFilter;
+    private noiseGain;
+    private sparkle;
+    private resizeTimer;
+    private mutedNow;
+    constructor(opts: RoomOptions, vw: number, factors: PerceptualFactors);
+    setFactors(f: PerceptualFactors): void;
+    private roomParams;
+    /** Debounced: Tone.Reverb regenerates its impulse response when decay changes. */
+    resize(vw: number): void;
+    /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
+    startAmbience(vw: number, level: number, pickSparkle: () => (() => void) | null): void;
+    /** I14 — never sound in a background tab. */
+    setHidden(hidden: boolean): void;
+    setMuted(muted: boolean): void;
+    dispose(): void;
+}
+
+/**
+ * Pure field rotation — SPATIAL.md §3.1. The 3×3 matrix acts on the (X, Y, Z) channel triple
+ * (W is rotation-invariant). Row-major: m[r][c], applied as X' = m00·X + m01·Y + m02·Z, etc.
+ * Composition R = Rz(yaw) · Ry(pitch) · Rx(roll). Angles in radians.
+ */
+type Mat3 = [
+    [
+        number,
+        number,
+        number
+    ],
+    [
+        number,
+        number,
+        number
+    ],
+    [
+        number,
+        number,
+        number
+    ]
+];
+/** Acts on column vectors (X, Y, Z)ᵀ in the AmbiX frame (+x fwd, +y left, +z up). */
+declare function rotationMatrix(yaw: number, pitch: number, roll?: number): Mat3;
+declare function applyMat3(m: Mat3, v: [number, number, number]): [number, number, number];
+/**
+ * Look semantics (SPATIAL.md §3.1): the field rotation is the INVERSE of the head's intrinsic
+ * yaw-then-pitch rotation. Looking right by α (head Rz(−α)) and up by β (head Ry(−β)) gives
+ * field R = (Rz(−α)·Ry(−β))⁻¹ = Ry(β)·Rz(α). The sign/composition decision lives here and
+ * only here, pinned by tests: look right → right-side sources arrive frontward; look up →
+ * overhead sources arrive frontward.
+ */
+declare function lookMatrix(yawRight: number, pitchUp: number): Mat3;
+
+/**
+ * SpatialBackend — the seam between the voice pool and the spatial engine (SPATIAL.md §6).
+ * 'ambisonic' encodes every lane into the shared FOA field; 'panner' is the v0.1 per-voice
+ * HRTF path, kept as option and automatic fallback. Imports Tone only.
+ */
+
+interface LaneOutput {
+    /** The lane's filter connects here. */
+    input: Tone.InputNode;
+    /** Place the voice in space from its profile (called at trigger time). */
+    setPlacement(profile: SonicProfile, when?: number): void;
+    dispose(): void;
+}
+interface SpatialBackend {
+    readonly kind: 'ambisonic' | 'panner';
+    createOutput(): LaneOutput;
+    setFactors(factors: PerceptualFactors): void;
+    /** Rotate the field (ambisonic) — no-op on the panner backend. */
+    setRotation(m: Mat3): void;
+    onViewport(vw: number): void;
+    dispose(): void;
+}
+
+declare class FieldRig {
+    private backend;
+    private mode;
+    private target;
+    private tilt;
+    private look;
+    private raf;
+    private running;
+    constructor(backend: SpatialBackend, mode: 'pointer' | 'center');
+    start(): void;
+    /** I9 — cursor (viewport-normalized 0..1) becomes look direction: right edge = look right. */
+    pointTo(tx: number, ty: number): void;
+    /** I10 — device attitude: γ right-tilt = look right, β beyond ~40° = look up/down. */
+    tiltTo(gamma: number, beta: number): void;
+    /** Public look API (head tracking / WebXR later plugs in here). Radians, right/up positive. */
+    lookAt(yawRight: number, pitchUp: number): void;
+    get state(): {
+        yaw: number;
+        pitch: number;
+    };
+    dispose(): void;
 }
 
 declare class ListenerRig {
@@ -116,61 +294,6 @@ declare class ListenerRig {
     pointTo(tx: number, ty: number): void;
     /** I10 — device tilt offsets the ears (γ → x ±4 m, β → y ±2 m). */
     tiltTo(gamma: number, beta: number): void;
-    dispose(): void;
-}
-
-/**
- * L0 Acoustic Substrate — VoicePool (ARCHITECTURE.md §4).
- * Profiles are data; voices are rented lanes configured at trigger time. Imports Tone only;
- * never reads the DOM.
- */
-
-interface VoiceBuses {
-    dryIn: Tone.InputNode;
-    wetIn: Tone.InputNode;
-}
-declare class VoicePool {
-    private buses;
-    private maxVoices;
-    private panningModel;
-    private lanes;
-    constructor(buses: VoiceBuses, maxVoices: number, panningModel: 'HRTF' | 'equalpower');
-    private createSynth;
-    private createLane;
-    private acquire;
-    /** Configure a lane from the profile, then sound it. `when` lets strums schedule ahead. */
-    trigger(profile: SonicProfile, velocity: number, when?: number): void;
-    get activeCount(): number;
-    dispose(): void;
-}
-
-interface RoomOptions {
-    volumeDb: number;
-    reverb: 'auto' | number;
-    ambient: number;
-}
-declare class Room {
-    private opts;
-    readonly buses: VoiceBuses;
-    private master;
-    private limiter;
-    private reverb;
-    private wetGain;
-    private noise;
-    private noiseFilter;
-    private noiseGain;
-    private sparkle;
-    private resizeTimer;
-    private mutedNow;
-    constructor(opts: RoomOptions, vw: number);
-    private roomParams;
-    /** Debounced: Tone.Reverb regenerates its impulse response when decay changes. */
-    resize(vw: number): void;
-    /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
-    startAmbience(vw: number, level: number, pickSparkle: () => (() => void) | null): void;
-    /** I14 — never sound in a background tab. */
-    setHidden(hidden: boolean): void;
-    setMuted(muted: boolean): void;
     dispose(): void;
 }
 
@@ -232,6 +355,7 @@ interface ResolvedOptions {
     volume: number;
     maxVoices: number;
     panning: 'HRTF' | 'equalpower';
+    spatial: 'ambisonic' | 'panner';
     reverb: 'auto' | number;
     velocityFactor: number;
 }
@@ -243,7 +367,9 @@ declare class Engine {
     scanner: Scanner;
     pool: VoicePool | null;
     room: Room | null;
-    rig: ListenerRig | null;
+    rig: ListenerRig | FieldRig | null;
+    backend: SpatialBackend | null;
+    factors: PerceptualFactors;
     private gate;
     private env;
     private detachers;
@@ -256,6 +382,13 @@ declare class Engine {
     private removeUnlockListeners;
     private starting;
     start(): Promise<void>;
+    /**
+     * SPATIAL.md §6 — ambisonic field by default; if its construction throws on an exotic
+     * browser, fall back to the v0.1 per-voice panner world rather than staying silent.
+     */
+    private buildAudioGraph;
+    /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
+    setPerceptual(partial: Partial<PerceptualFactors>): void;
     toggleMute(): void;
     dispose(): void;
     /**
@@ -365,6 +498,76 @@ declare namespace mapping {
 }
 
 /**
+ * Pure spherical-harmonic encoding — SPATIAL.md §1–2. AmbiX: ACN order [W, Y, Z, X],
+ * SN3D normalization, +x forward, +y left, +z up, +azimuth left. No DOM, no Tone.
+ */
+declare const DEG: number;
+interface FoaGains {
+    w: number;
+    y: number;
+    z: number;
+    x: number;
+}
+/**
+ * First-order encode of a plane wave from (azimuth, elevation), with extent σ blending the
+ * directional components into the omni channel (SPATIAL.md §2). Angles in radians.
+ */
+declare function foaGains(azimuth: number, elevation: number, extent?: number): FoaGains;
+/** Unit direction vector for (azimuth, elevation) in the AmbiX frame. */
+declare function unitVector(azimuth: number, elevation: number): [number, number, number];
+
+/**
+ * Pure FOA decoding — SPATIAL.md §3.2. Sampling decoder with max-rE weighting over a fixed
+ * virtual-speaker layout; each speaker is later rendered by one native HRTF panner.
+ */
+
+interface Speaker {
+    /** Unit direction in the AmbiX frame. */
+    dir: [number, number, number];
+    label: string;
+}
+/** Cube vertices: full-sphere coverage including elevation, symmetric, M = 8. */
+declare const CUBE_LAYOUT: Speaker[];
+interface DecodeRow {
+    /** Per-ACN gains [w, y, z, x] for one speaker: s = w·W + y·Y + z·Z + x·X. */
+    w: number;
+    y: number;
+    z: number;
+    x: number;
+}
+/**
+ * Sampling decode matrix for SN3D input: sm = (1/M)·[g0·W + 3·g1·(X·xm + Y·ym + Z·zm)].
+ * The 3 re-normalizes first-order SN3D to N3D inside the projection.
+ */
+declare function decodeMatrix(layout: Speaker[]): DecodeRow[];
+/** Decode an encoded source to speaker signals (used by tests and the worklet path later). */
+declare function decodeGains(rows: DecodeRow[], g: FoaGains): number[];
+
+declare const AZ_MAX: number;
+declare const EL_MAX: number;
+/** SP1/SP2 — screen position → direction. Screen-right = −azimuth (sign tested). */
+declare function sphereFromRect(rect: Rect, vw: number, vh: number): {
+    azimuth: number;
+    elevation: number;
+};
+/** SP4 — big elements wrap around the listener (T2 extended into space). */
+declare function extentFromSize(sizeT: number): number;
+/** SP5 — Kiki/Bouba in the spatial domain: sharp beams, round radiates. */
+declare function directivityFromRoundness(roundness: number): number;
+/** SP6 — early-reflection time scale follows the room (viewport). */
+declare function reflectionScaleFromViewport(vw: number): number;
+
+declare const sphere_AZ_MAX: typeof AZ_MAX;
+declare const sphere_EL_MAX: typeof EL_MAX;
+declare const sphere_directivityFromRoundness: typeof directivityFromRoundness;
+declare const sphere_extentFromSize: typeof extentFromSize;
+declare const sphere_reflectionScaleFromViewport: typeof reflectionScaleFromViewport;
+declare const sphere_sphereFromRect: typeof sphereFromRect;
+declare namespace sphere {
+  export { sphere_AZ_MAX as AZ_MAX, sphere_EL_MAX as EL_MAX, sphere_directivityFromRoundness as directivityFromRoundness, sphere_extentFromSize as extentFromSize, sphere_reflectionScaleFromViewport as reflectionScaleFromViewport, sphere_sphereFromRect as sphereFromRect };
+}
+
+/**
  * Sonarium — drop-in acoustic UX.
  * One script tag turns any webpage into a spatial sound field: layout becomes a stereo stage,
  * geometry becomes timbre (Kiki/Bouba), the DOM tree becomes depth and harmony, the viewport
@@ -378,7 +581,7 @@ declare namespace mapping {
  * Docs: https://github.com/frank890417/sonarium — start with docs/PLAN.md.
  */
 
-declare const version = "0.1.0";
+declare const version = "0.2.0";
 
 /**
  * Create a Sonarium instance. Safe to call before any user gesture: audio arms itself and
@@ -386,4 +589,4 @@ declare const version = "0.1.0";
  */
 declare function create(options?: SonariumOptions): Engine;
 
-export { type Articulation, Engine, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, create, degreeToMidi, mapping, midiToFreq, midiToNoteName, parseKey, siteKey, version };
+export { type Articulation, CUBE_LAYOUT, DEFAULT_FACTORS, DEG, Engine, type PerceptualFactors, type Role, SCALES, type SonariumEvent, type SonariumOptions, type SonicProfile, type SphereProps, type SynthKind, THEMES, type Theme, type TriggerDetail, type VoiceRecipe, type Wave, applyMat3, create, decodeGains, decodeMatrix, degreeToMidi, foaGains, lookMatrix, mapping, midiToFreq, midiToNoteName, parseKey, rotationMatrix, siteKey, sphere as sphereMapping, unitVector, version };

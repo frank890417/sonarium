@@ -5,9 +5,12 @@
 import * as Tone from 'tone'
 import { parseKey, siteKey, type SiteKey } from '../math/scales'
 import { clamp } from '../math/util'
-import type { Articulation, SonariumOptions, SonicProfile, SonariumEvent, Theme, TriggerDetail } from '../types'
+import type { Articulation, PerceptualFactors, SonariumOptions, SonicProfile, SonariumEvent, Theme, TriggerDetail } from '../types'
 import { resolveTheme } from '../themes/index'
 import { mountGate, isMutedPersisted, persistMuted, type GateHandle } from '../ui/gate'
+import { AmbisonicBackend, PannerBackend, type SpatialBackend } from '../spatial/backend'
+import { FieldRig } from '../spatial/field'
+import { resolveFactors } from '../spatial/perceptual'
 import { ListenerRig } from './listener'
 import type { ProfileEnv } from './profile'
 import { Room } from './room'
@@ -30,6 +33,7 @@ interface ResolvedOptions {
   volume: number
   maxVoices: number
   panning: 'HRTF' | 'equalpower'
+  spatial: 'ambisonic' | 'panner'
   reverb: 'auto' | number
   velocityFactor: number
 }
@@ -44,7 +48,9 @@ export class Engine {
   scanner!: Scanner
   pool: VoicePool | null = null
   room: Room | null = null
-  rig: ListenerRig | null = null
+  rig: ListenerRig | FieldRig | null = null
+  backend: SpatialBackend | null = null
+  factors: PerceptualFactors
 
   private gate: GateHandle | null = null
   private env: ProfileEnv
@@ -76,9 +82,11 @@ export class Engine {
       volume: userOpts.volume ?? -10,
       maxVoices: clamp(userOpts.maxVoices ?? 18, 4, 24),
       panning: userOpts.panning === 'equalpower' ? 'equalpower' : 'HRTF',
+      spatial: userOpts.spatial === 'panner' ? 'panner' : 'ambisonic',
       reverb: userOpts.reverb ?? 'auto',
       velocityFactor: reduced ? 0.7 : 1,
     }
+    this.factors = resolveFactors(userOpts.perceptual)
 
     this.env = {
       root: this.opts.root,
@@ -144,11 +152,8 @@ export class Engine {
     this.removeUnlockListeners()
     this.gate?.setState(this.muted ? 'muted' : 'on')
 
-    this.room = new Room({ volumeDb: this.opts.volume, reverb: this.opts.reverb, ambient: this.opts.ambient }, this.env.vw)
-    this.pool = new VoicePool(this.room.buses, this.opts.maxVoices, this.opts.panning)
-    this.rig = new ListenerRig(this.opts.listener)
-    this.rig.start()
-    if (this.muted) this.room.setMuted(true)
+    this.buildAudioGraph()
+    if (this.muted) this.room?.setMuted(true)
 
     this.detachers.push(
       attachPointer(this),
@@ -164,9 +169,43 @@ export class Engine {
 
     this.bucketTimer = setInterval(() => { this.appearBucket = Math.min(6, this.appearBucket + 6) }, 1000)
 
-    this.room.startAmbience(this.env.vw, this.opts.ambient, () => this.pickSparkle())
+    this.room?.startAmbience(this.env.vw, this.opts.ambient, () => this.pickSparkle())
     this.playIntroMotif()
     this.emit('start')
+  }
+
+  /**
+   * SPATIAL.md §6 — ambisonic field by default; if its construction throws on an exotic
+   * browser, fall back to the v0.1 per-voice panner world rather than staying silent.
+   */
+  private buildAudioGraph(): void {
+    const roomOpts = { volumeDb: this.opts.volume, reverb: this.opts.reverb, ambient: this.opts.ambient }
+    if (this.opts.spatial === 'ambisonic') {
+      try {
+        this.room = new Room({ ...roomOpts, mode: 'ambisonic' }, this.env.vw, this.factors)
+        const decoderKind = this.opts.panning === 'equalpower' ? 'stereo' : 'binaural'
+        this.backend = new AmbisonicBackend(this.room, decoderKind, this.env.vw, this.factors)
+        this.rig = new FieldRig(this.backend, this.opts.listener)
+        this.rig.start()
+        this.pool = new VoicePool(this.backend, this.opts.maxVoices)
+        return
+      } catch (err) {
+        console.warn('[sonarium] ambisonic backend unavailable, falling back to panner', err)
+        this.room?.dispose()
+        this.room = null
+      }
+    }
+    this.room = new Room({ ...roomOpts, mode: 'panner' }, this.env.vw, this.factors)
+    this.backend = new PannerBackend(this.room, this.opts.panning)
+    this.rig = new ListenerRig(this.opts.listener)
+    this.rig.start()
+    this.pool = new VoicePool(this.backend, this.opts.maxVoices)
+  }
+
+  /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
+  setPerceptual(partial: Partial<PerceptualFactors>): void {
+    this.factors = resolveFactors({ ...this.factors, ...partial })
+    this.backend?.setFactors(this.factors)
   }
 
   toggleMute(): void {
@@ -195,6 +234,7 @@ export class Engine {
     this.scanner?.dispose()
     this.rig?.dispose()
     this.pool?.dispose()
+    this.backend?.dispose()
     this.room?.dispose()
     this.gate?.dispose()
     this.emit('dispose')
@@ -293,6 +333,7 @@ export class Engine {
   roomResized(): void {
     this.geometryChanged()
     this.room?.resize(this.env.vw)
+    this.backend?.onViewport(this.env.vw)
   }
 
   // ---------------------------------------------------------------- events

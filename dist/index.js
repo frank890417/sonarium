@@ -5,7 +5,7 @@ var __export = (target, all) => {
 };
 
 // src/core/engine.ts
-import * as Tone4 from "tone";
+import * as Tone8 from "tone";
 
 // src/math/util.ts
 var clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -194,8 +194,510 @@ function mountGate(onToggle) {
   };
 }
 
-// src/core/listener.ts
+// src/spatial/backend.ts
+import * as Tone4 from "tone";
+
+// src/spatial/bus.ts
 import * as Tone from "tone";
+
+// src/spatial/sh.ts
+var DEG = Math.PI / 180;
+function foaGains(azimuth, elevation, extent = 0) {
+  const s = Math.min(1, Math.max(0, extent));
+  const cosEl = Math.cos(elevation);
+  const dir = 1 - s;
+  return {
+    w: 1 + 0.41 * s,
+    y: dir * Math.sin(azimuth) * cosEl,
+    z: dir * Math.sin(elevation),
+    x: dir * Math.cos(azimuth) * cosEl
+  };
+}
+function unitVector(azimuth, elevation) {
+  const cosEl = Math.cos(elevation);
+  return [Math.cos(azimuth) * cosEl, Math.sin(azimuth) * cosEl, Math.sin(elevation)];
+}
+
+// src/spatial/decoder.ts
+var C = 1 / Math.sqrt(3);
+var CUBE_LAYOUT = [
+  { dir: [C, C, C], label: "front-left-up" },
+  { dir: [C, -C, C], label: "front-right-up" },
+  { dir: [C, C, -C], label: "front-left-down" },
+  { dir: [C, -C, -C], label: "front-right-down" },
+  { dir: [-C, C, C], label: "back-left-up" },
+  { dir: [-C, -C, C], label: "back-right-up" },
+  { dir: [-C, C, -C], label: "back-left-down" },
+  { dir: [-C, -C, -C], label: "back-right-down" }
+];
+var MAXRE_G0 = 1;
+var MAXRE_G1 = 1 / Math.sqrt(3);
+function decodeMatrix(layout) {
+  const M = layout.length;
+  return layout.map(({ dir }) => ({
+    w: 1 / M * MAXRE_G0,
+    x: 3 / M * MAXRE_G1 * dir[0],
+    y: 3 / M * MAXRE_G1 * dir[1],
+    z: 3 / M * MAXRE_G1 * dir[2]
+  }));
+}
+function decodeGains(rows, g) {
+  return rows.map((r) => r.w * g.w + r.y * g.y + r.z * g.z + r.x * g.x);
+}
+
+// src/spatial/rotation.ts
+var IDENTITY = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1]
+];
+function mul(a, b) {
+  const out = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0]
+  ];
+  for (let r = 0; r < 3; r++)
+    for (let c = 0; c < 3; c++)
+      out[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
+  return out;
+}
+function rotationMatrix(yaw, pitch, roll = 0) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const Rz = [
+    [cy, -sy, 0],
+    [sy, cy, 0],
+    [0, 0, 1]
+  ];
+  const Ry = [
+    [cp, 0, sp],
+    [0, 1, 0],
+    [-sp, 0, cp]
+  ];
+  const Rx = [
+    [1, 0, 0],
+    [0, cr, -sr],
+    [0, sr, cr]
+  ];
+  return mul(mul(Rz, Ry), Rx);
+}
+function applyMat3(m, v) {
+  return [
+    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2]
+  ];
+}
+function lookMatrix(yawRight, pitchUp) {
+  const pitch = rotationMatrix(0, pitchUp, 0);
+  const yaw = rotationMatrix(yawRight, 0, 0);
+  return mul(pitch, yaw);
+}
+
+// src/spatial/bus.ts
+var SPEAKER_RADIUS = 2.5;
+var AmbisonicBus = class {
+  constructor(destination, decoderKind) {
+    this.nodes = [];
+    this.inputs = { w: new Tone.Gain(1), y: new Tone.Gain(1), z: new Tone.Gain(1), x: new Tone.Gain(1) };
+    this.outW = new Tone.Gain(1);
+    this.outXYZ = [new Tone.Gain(1), new Tone.Gain(1), new Tone.Gain(1)];
+    this.inputs.w.connect(this.outW);
+    const inXYZ = [this.inputs.x, this.inputs.y, this.inputs.z];
+    this.rot = [];
+    for (let r = 0; r < 3; r++) {
+      const row = [];
+      for (let c = 0; c < 3; c++) {
+        const g = new Tone.Gain(IDENTITY[r][c]);
+        inXYZ[c].connect(g);
+        g.connect(this.outXYZ[r]);
+        row.push(g);
+      }
+      this.rot.push(row);
+    }
+    if (decoderKind === "stereo") this.buildStereoDecode(destination);
+    else this.buildVirtualSpeakerDecode(destination);
+    this.nodes.push(this.inputs.w, this.inputs.y, this.inputs.z, this.inputs.x, this.outW, ...this.outXYZ, ...this.rot.flat());
+  }
+  /** SPATIAL.md §3.2 — 8 cube speakers, each a static mix of (W, X', Y', Z') into a fixed HRTF panner. */
+  buildVirtualSpeakerDecode(destination) {
+    const rows = decodeMatrix(CUBE_LAYOUT);
+    rows.forEach((row, i) => {
+      const dir = CUBE_LAYOUT[i].dir;
+      const sum = new Tone.Gain(1);
+      const mw = new Tone.Gain(row.w);
+      const mx = new Tone.Gain(row.x);
+      const my = new Tone.Gain(row.y);
+      const mz = new Tone.Gain(row.z);
+      this.outW.connect(mw);
+      this.outXYZ[0].connect(mx);
+      this.outXYZ[1].connect(my);
+      this.outXYZ[2].connect(mz);
+      mw.connect(sum);
+      mx.connect(sum);
+      my.connect(sum);
+      mz.connect(sum);
+      const panner = new Tone.Panner3D({
+        panningModel: "HRTF",
+        distanceModel: "inverse",
+        refDistance: SPEAKER_RADIUS,
+        rolloffFactor: 0,
+        // fixed-radius speakers: direction only, no distance shading
+        positionX: -dir[1] * SPEAKER_RADIUS,
+        positionY: dir[2] * SPEAKER_RADIUS,
+        positionZ: -dir[0] * SPEAKER_RADIUS
+      });
+      sum.connect(panner);
+      panner.connect(destination);
+      this.nodes.push(sum, mw, mx, my, mz, panner);
+    });
+  }
+  /** Fallback decode without HRTF: two virtual cardioids at ±90° (SPATIAL.md §3.2). */
+  buildStereoDecode(destination) {
+    const L = new Tone.Gain(1);
+    const R = new Tone.Gain(1);
+    const wL = new Tone.Gain(0.5);
+    const wR = new Tone.Gain(0.5);
+    const yL = new Tone.Gain(0.5);
+    const yR = new Tone.Gain(-0.5);
+    this.outW.connect(wL);
+    this.outW.connect(wR);
+    this.outXYZ[1].connect(yL);
+    this.outXYZ[1].connect(yR);
+    wL.connect(L);
+    yL.connect(L);
+    wR.connect(R);
+    yR.connect(R);
+    const merge = new Tone.Merge();
+    L.connect(merge, 0, 0);
+    R.connect(merge, 0, 1);
+    merge.connect(destination);
+    this.nodes.push(L, R, wL, wR, yL, yR, merge);
+  }
+  /** Rotate the whole field (FieldRig calls this with lookMatrix output). Ramped, zipper-free. */
+  setRotation(m, rampS = 0.04) {
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < 3; c++)
+        this.rot[r][c].gain.rampTo(m[r][c], rampS);
+  }
+  dispose() {
+    for (const n of this.nodes) n.dispose();
+    this.nodes = [];
+  }
+};
+
+// src/spatial/encoder.ts
+import * as Tone2 from "tone";
+var SourceEncoder = class {
+  constructor(bus) {
+    this.input = new Tone2.Gain(1);
+    this.gw = new Tone2.Gain(1);
+    this.gy = new Tone2.Gain(0);
+    this.gz = new Tone2.Gain(0);
+    this.gx = new Tone2.Gain(1);
+    this.input.connect(this.gw);
+    this.input.connect(this.gy);
+    this.input.connect(this.gz);
+    this.input.connect(this.gx);
+    this.gw.connect(bus.w);
+    this.gy.connect(bus.y);
+    this.gz.connect(bus.z);
+    this.gx.connect(bus.x);
+  }
+  /** Apply SH gains × an overall direct-path gain, ramped to avoid zipper noise. */
+  set(g, directGain2, when, rampS = 0.015) {
+    const t = when ?? Tone2.now();
+    this.gw.gain.rampTo(g.w * directGain2, rampS, t);
+    this.gy.gain.rampTo(g.y * directGain2, rampS, t);
+    this.gz.gain.rampTo(g.z * directGain2, rampS, t);
+    this.gx.gain.rampTo(g.x * directGain2, rampS, t);
+  }
+  dispose() {
+    this.input.dispose();
+    this.gw.dispose();
+    this.gy.dispose();
+    this.gz.dispose();
+    this.gx.dispose();
+  }
+};
+
+// src/spatial/room-foa.ts
+import * as Tone3 from "tone";
+
+// src/spatial/sphere.ts
+var sphere_exports = {};
+__export(sphere_exports, {
+  AZ_MAX: () => AZ_MAX,
+  EL_MAX: () => EL_MAX,
+  directivityFromRoundness: () => directivityFromRoundness,
+  extentFromSize: () => extentFromSize,
+  reflectionScaleFromViewport: () => reflectionScaleFromViewport,
+  sphereFromRect: () => sphereFromRect
+});
+var AZ_MAX = 70 * DEG;
+var EL_MAX = 45 * DEG;
+function sphereFromRect(rect, vw, vh) {
+  const tx = norm(rect.x + rect.w / 2, 0, vw);
+  const ty = norm(rect.y + rect.h / 2, 0, vh);
+  return {
+    azimuth: -(2 * tx - 1) * AZ_MAX,
+    elevation: (1 - 2 * ty) * EL_MAX
+  };
+}
+function extentFromSize(sizeT2) {
+  return clamp(0.05 + 0.75 * Math.pow(clamp(sizeT2, 0, 1), 1.2), 0, 0.95);
+}
+function directivityFromRoundness(roundness2) {
+  return clamp(1 - roundness2, 0, 1);
+}
+function reflectionScaleFromViewport(vw) {
+  return 0.6 + norm(vw, 360, 2200) * 1;
+}
+
+// src/spatial/perceptual.ts
+var DEFAULT_FACTORS = {
+  presence: 0.7,
+  roomPresence: 0.5,
+  envelopment: 0.55,
+  warmth: 0.5,
+  brilliance: 0.5
+};
+function resolveFactors(partial) {
+  const f = { ...DEFAULT_FACTORS, ...partial ?? {} };
+  for (const k of Object.keys(f)) f[k] = clamp(f[k], 0, 1);
+  return f;
+}
+var directGain = (presence) => lerp(0.5, 1.2, clamp(presence, 0, 1));
+var roomGain = (roomPresence) => lerp(0, 1.6, clamp(roomPresence, 0, 1));
+var tailExtent = (envelopment) => clamp(envelopment, 0, 1);
+var tailLevel = (envelopment) => lerp(0.7, 1.25, clamp(envelopment, 0, 1));
+var warmthDb = (warmth) => lerp(-3, 3, clamp(warmth, 0, 1));
+var brillianceDb = (brilliance) => lerp(-4, 3, clamp(brilliance, 0, 1));
+var directivityDirectGain = (d) => lerp(0.75, 1.1, clamp(d, 0, 1));
+var directivitySendScale = (d) => lerp(1.35, 0.8, clamp(d, 0, 1));
+var directivityFilterScale = (d) => lerp(0.85, 1.15, clamp(d, 0, 1));
+
+// src/spatial/room-foa.ts
+var ER_BASE_TIMES = [0.013, 0.019, 0.027, 0.034];
+var ER_TAP_LEVELS = [1, 0.85, 0.7, 0.6];
+var ER_DIRECTIONS = [
+  [110 * DEG, 30 * DEG],
+  [-110 * DEG, 30 * DEG],
+  [110 * DEG, -30 * DEG],
+  [-110 * DEG, -30 * DEG]
+];
+var FoaRoom = class {
+  constructor(bus, reverb, vw, factors) {
+    this.delays = [];
+    this.nodes = [];
+    this.erIn = new Tone3.Gain(1);
+    this.erMaster = new Tone3.Gain(0.22 * roomGain(factors.roomPresence));
+    this.erIn.connect(this.erMaster);
+    const scale = reflectionScaleFromViewport(vw);
+    ER_BASE_TIMES.forEach((t, i) => {
+      const delay = new Tone3.Delay({ delayTime: t * scale, maxDelay: 0.12 });
+      const tap = new Tone3.Gain(ER_TAP_LEVELS[i]);
+      const enc = new SourceEncoder(bus);
+      const [az, el] = ER_DIRECTIONS[i];
+      enc.set(foaGains(az, el, 0.35), 1);
+      this.erMaster.connect(delay);
+      delay.connect(tap);
+      tap.connect(enc.input);
+      this.delays.push(delay);
+      this.nodes.push(delay, tap, enc);
+    });
+    this.split = new Tone3.Split();
+    reverb.connect(this.split);
+    this.tailL = new SourceEncoder(bus);
+    this.tailR = new SourceEncoder(bus);
+    this.split.connect(this.tailL.input, 0);
+    this.split.connect(this.tailR.input, 1);
+    this.applyTail(factors);
+    this.nodes.push(this.erIn, this.erMaster, this.split, this.tailL, this.tailR);
+  }
+  applyTail(f) {
+    const ext = tailExtent(f.envelopment);
+    const level = tailLevel(f.envelopment);
+    this.tailL.set(foaGains(120 * DEG, 0, ext), level);
+    this.tailR.set(foaGains(-120 * DEG, 0, ext), level);
+  }
+  setFactors(f) {
+    this.erMaster.gain.rampTo(0.22 * roomGain(f.roomPresence), 0.1);
+    this.applyTail(f);
+  }
+  setViewport(vw) {
+    const scale = reflectionScaleFromViewport(vw);
+    this.delays.forEach((d, i) => d.delayTime.rampTo(ER_BASE_TIMES[i] * scale, 0.3));
+  }
+  dispose() {
+    for (const n of this.nodes) n.dispose();
+    this.nodes = [];
+  }
+};
+
+// src/spatial/backend.ts
+var AmbisonicBackend = class {
+  constructor(room, decoderKind, vw, factors) {
+    this.room = room;
+    this.kind = "ambisonic";
+    this.factors = resolveFactors(factors);
+    this.bus = new AmbisonicBus(room.spatialIn, decoderKind);
+    this.foaRoom = new FoaRoom(this.bus.inputs, room.reverb, vw, this.factors);
+  }
+  createOutput() {
+    const enc = new SourceEncoder(this.bus.inputs);
+    const send = new Tone4.Gain(0.15);
+    enc.input.connect(send);
+    send.connect(this.room.reverb);
+    enc.input.connect(this.foaRoom.erIn);
+    const backend = this;
+    return {
+      input: enc.input,
+      setPlacement(profile, when) {
+        const s = profile.sphere;
+        const g = foaGains(s.azimuth, s.elevation, s.extent);
+        const direct = directGain(backend.factors.presence) * directivityDirectGain(s.directivity);
+        enc.set(g, direct, when);
+        const wetSend = clamp(
+          profile.reverbSend * directivitySendScale(s.directivity) * roomGain(backend.factors.roomPresence),
+          0,
+          1.5
+        );
+        send.gain.rampTo(wetSend, 0.02, when ?? Tone4.now());
+      },
+      dispose() {
+        enc.dispose();
+        send.dispose();
+      }
+    };
+  }
+  setFactors(factors) {
+    this.factors = factors;
+    this.foaRoom.setFactors(factors);
+    this.room.setFactors(factors);
+  }
+  setRotation(m) {
+    this.bus.setRotation(m);
+  }
+  onViewport(vw) {
+    this.foaRoom.setViewport(vw);
+  }
+  dispose() {
+    this.foaRoom.dispose();
+    this.bus.dispose();
+  }
+};
+var PannerBackend = class {
+  constructor(room, panningModel) {
+    this.room = room;
+    this.panningModel = panningModel;
+    this.kind = "panner";
+  }
+  createOutput() {
+    const panner = new Tone4.Panner3D({
+      panningModel: this.panningModel,
+      distanceModel: "inverse",
+      refDistance: 1,
+      rolloffFactor: 0.4,
+      positionX: 0,
+      positionY: 0,
+      positionZ: -2
+    });
+    const dry = new Tone4.Gain(1);
+    const send = new Tone4.Gain(0.18);
+    panner.connect(dry);
+    panner.connect(send);
+    dry.connect(this.room.buses.dryIn);
+    send.connect(this.room.buses.wetIn);
+    return {
+      input: panner,
+      setPlacement(profile, when) {
+        const t = when ?? Tone4.now();
+        panner.positionX.rampTo(profile.pan.x, 0.02, t);
+        panner.positionY.rampTo(profile.pan.y, 0.02, t);
+        panner.positionZ.rampTo(profile.pan.z, 0.02, t);
+        send.gain.rampTo(clamp(profile.reverbSend, 0, 1), 0.02, t);
+      },
+      dispose() {
+        panner.dispose();
+        dry.dispose();
+        send.dispose();
+      }
+    };
+  }
+  setFactors(factors) {
+    this.room.setFactors(factors);
+  }
+  setRotation() {
+  }
+  onViewport() {
+  }
+  dispose() {
+  }
+};
+
+// src/spatial/field.ts
+var POINTER_YAW_MAX = 40 * DEG;
+var POINTER_PITCH_MAX = 20 * DEG;
+var TILT_YAW_MAX = 35 * DEG;
+var TILT_PITCH_MAX = 25 * DEG;
+var FieldRig = class {
+  constructor(backend, mode) {
+    this.backend = backend;
+    this.mode = mode;
+    this.target = { yaw: 0, pitch: 0 };
+    this.tilt = { yaw: 0, pitch: 0 };
+    this.look = { yaw: 0, pitch: 0 };
+    this.raf = 0;
+    this.running = false;
+  }
+  start() {
+    if (this.running) return;
+    this.running = true;
+    const step = () => {
+      if (!this.running) return;
+      const gy = clamp(this.target.yaw + this.tilt.yaw, -Math.PI / 2, Math.PI / 2);
+      const gp = clamp(this.target.pitch + this.tilt.pitch, -Math.PI / 3, Math.PI / 3);
+      const ny = lerp(this.look.yaw, gy, 0.1);
+      const np = lerp(this.look.pitch, gp, 0.1);
+      if (Math.abs(ny - this.look.yaw) > 1e-4 || Math.abs(np - this.look.pitch) > 1e-4) {
+        this.look.yaw = ny;
+        this.look.pitch = np;
+        this.backend.setRotation(lookMatrix(this.look.yaw, this.look.pitch));
+      }
+      this.raf = requestAnimationFrame(step);
+    };
+    this.raf = requestAnimationFrame(step);
+  }
+  /** I9 — cursor (viewport-normalized 0..1) becomes look direction: right edge = look right. */
+  pointTo(tx, ty) {
+    if (this.mode !== "pointer") return;
+    this.target.yaw = (2 * clamp(tx, 0, 1) - 1) * POINTER_YAW_MAX;
+    this.target.pitch = (1 - 2 * clamp(ty, 0, 1)) * POINTER_PITCH_MAX;
+  }
+  /** I10 — device attitude: γ right-tilt = look right, β beyond ~40° = look up/down. */
+  tiltTo(gamma, beta) {
+    this.tilt.yaw = clamp(gamma / 45, -1, 1) * TILT_YAW_MAX;
+    this.tilt.pitch = clamp((beta - 40) / 45, -1, 1) * -TILT_PITCH_MAX;
+  }
+  /** Public look API (head tracking / WebXR later plugs in here). Radians, right/up positive. */
+  lookAt(yawRight, pitchUp) {
+    this.target.yaw = yawRight;
+    this.target.pitch = pitchUp;
+  }
+  get state() {
+    return { yaw: this.look.yaw, pitch: this.look.pitch };
+  }
+  dispose() {
+    this.running = false;
+    cancelAnimationFrame(this.raf);
+  }
+};
+
+// src/core/listener.ts
+import * as Tone5 from "tone";
 
 // src/math/mapping.ts
 var mapping_exports = {};
@@ -285,7 +787,7 @@ var ListenerRig = class {
   start() {
     if (this.running) return;
     this.running = true;
-    const listener = Tone.getListener();
+    const listener = Tone5.getListener();
     listener.forwardX.value = 0;
     listener.forwardY.value = 0;
     listener.forwardZ.value = -1;
@@ -324,23 +826,33 @@ var ListenerRig = class {
 };
 
 // src/core/room.ts
-import * as Tone2 from "tone";
+import * as Tone6 from "tone";
 var Room = class {
-  constructor(opts, vw) {
+  constructor(opts, vw, factors) {
     this.opts = opts;
+    this.wetGain = null;
     this.noise = null;
     this.noiseFilter = null;
     this.noiseGain = null;
     this.sparkle = null;
     this.resizeTimer = null;
     this.mutedNow = false;
-    this.limiter = new Tone2.Limiter(-1).toDestination();
-    this.master = new Tone2.Volume(opts.volumeDb).connect(this.limiter);
+    this.limiter = new Tone6.Limiter(-1).toDestination();
+    this.master = new Tone6.Volume(opts.volumeDb).connect(this.limiter);
+    this.highShelf = new Tone6.Filter({ type: "highshelf", frequency: 4e3, gain: brillianceDb(factors.brilliance) }).connect(this.master);
+    this.lowShelf = new Tone6.Filter({ type: "lowshelf", frequency: 250, gain: warmthDb(factors.warmth) }).connect(this.highShelf);
+    this.spatialIn = new Tone6.Gain(1).connect(this.lowShelf);
     const { decay, wet } = this.roomParams(vw);
-    this.reverb = new Tone2.Reverb({ decay, preDelay: 0.02, wet: 1 });
-    this.wetGain = new Tone2.Gain(wet).connect(this.master);
-    this.reverb.connect(this.wetGain);
-    this.buses = { dryIn: this.master, wetIn: this.reverb };
+    this.reverb = new Tone6.Reverb({ decay, preDelay: 0.02, wet: 1 });
+    if (opts.mode === "panner") {
+      this.wetGain = new Tone6.Gain(wet).connect(this.spatialIn);
+      this.reverb.connect(this.wetGain);
+    }
+    this.buses = { dryIn: this.spatialIn, wetIn: this.reverb };
+  }
+  setFactors(f) {
+    this.lowShelf.gain.rampTo(warmthDb(f.warmth), 0.1);
+    this.highShelf.gain.rampTo(brillianceDb(f.brilliance), 0.1);
   }
   roomParams(vw) {
     if (this.opts.reverb !== "auto") {
@@ -356,7 +868,7 @@ var Room = class {
       const { decay, wet } = this.roomParams(vw);
       try {
         this.reverb.decay = decay;
-        this.wetGain.gain.rampTo(wet, 0.3);
+        this.wetGain?.gain.rampTo(wet, 0.3);
         this.noiseFilter?.frequency.rampTo(ambienceCutoffFromViewport(vw), 0.5);
       } catch (err) {
         console.warn("[sonarium] room resize failed", err);
@@ -366,20 +878,20 @@ var Room = class {
   /** I13 — room tone + sparkles. pickSparkle returns a play-thunk for a random visible element. */
   startAmbience(vw, level, pickSparkle) {
     if (level <= 0) return;
-    this.noise = new Tone2.Noise("brown");
-    this.noiseFilter = new Tone2.Filter({ frequency: ambienceCutoffFromViewport(vw), type: "lowpass" });
-    this.noiseGain = new Tone2.Gain(Tone2.dbToGain(-46) * clamp(level / 0.12, 0, 3));
+    this.noise = new Tone6.Noise("brown");
+    this.noiseFilter = new Tone6.Filter({ frequency: ambienceCutoffFromViewport(vw), type: "lowpass" });
+    this.noiseGain = new Tone6.Gain(Tone6.dbToGain(-46) * clamp(level / 0.12, 0, 3));
     this.noise.connect(this.noiseFilter);
     this.noiseFilter.connect(this.noiseGain);
-    this.noiseGain.connect(this.master);
+    this.noiseGain.connect(this.spatialIn);
     this.noise.start();
-    this.sparkle = new Tone2.Loop((time) => {
+    this.sparkle = new Tone6.Loop((time) => {
       if (Math.random() > 0.4) return;
       const play = pickSparkle();
-      if (play) Tone2.getDraw().schedule(play, time);
+      if (play) Tone6.getDraw().schedule(play, time);
     }, 2);
     this.sparkle.start(1);
-    Tone2.getTransport().start();
+    Tone6.getTransport().start();
   }
   /** I14 — never sound in a background tab. */
   setHidden(hidden) {
@@ -397,7 +909,10 @@ var Room = class {
     this.noiseFilter?.dispose();
     this.noiseGain?.dispose();
     this.reverb.dispose();
-    this.wetGain.dispose();
+    this.wetGain?.dispose();
+    this.spatialIn.dispose();
+    this.lowShelf.dispose();
+    this.highShelf.dispose();
     this.master.dispose();
     this.limiter.dispose();
   }
@@ -503,8 +1018,17 @@ function profileOf(el, env) {
   reasons.timbre = `roundness ${round.toFixed(2)} (radius ${radiusPx}px) \u2192 ${wave} wave, ${(attack * 1e3).toFixed(0)} ms attack`;
   const durationS = durationFromElongation(rect);
   reasons.duration = `aspect ${(Math.max(rect.w, rect.h) / Math.min(rect.w, rect.h)).toFixed(1)}:1 \u2192 ${durationS.toFixed(2)} s`;
-  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh);
-  reasons.filter = `depth ${depth} + vertical position \u2192 low-pass ${Math.round(filterHz)} Hz`;
+  const dir = sphereFromRect(rect, vw, vh);
+  const extentOverride = parseFloat(html.dataset?.sonicExtent ?? "");
+  const sphere = {
+    azimuth: dir.azimuth,
+    elevation: dir.elevation,
+    extent: isNaN(extentOverride) ? extentFromSize(st) : clamp(extentOverride, 0, 1),
+    directivity: directivityFromRoundness(round)
+  };
+  reasons.sphere = `az ${(sphere.azimuth / DEG).toFixed(0)}\xB0, el ${(sphere.elevation / DEG).toFixed(0)}\xB0, extent ${sphere.extent.toFixed(2)} (size wraps the listener), directivity ${sphere.directivity.toFixed(2)} (sharp beams, round radiates)`;
+  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh) * directivityFilterScale(sphere.directivity);
+  reasons.filter = `depth ${depth} + vertical position + directivity \u2192 low-pass ${Math.round(filterHz)} Hz`;
   let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth) * (isNaN(opacity) ? 1 : opacity);
   if (isQuiet(el)) velocityScale *= 0.4;
   velocityScale = clamp(velocityScale, 0, 1.5);
@@ -513,6 +1037,7 @@ function profileOf(el, env) {
     role,
     rect,
     pan,
+    sphere,
     midi,
     freqHz: midiToFreq(midi),
     degree,
@@ -712,61 +1237,46 @@ function safeProfile(el, env) {
 }
 
 // src/core/voices.ts
-import * as Tone3 from "tone";
+import * as Tone7 from "tone";
 var VoicePool = class {
-  constructor(buses, maxVoices, panningModel) {
-    this.buses = buses;
+  constructor(backend, maxVoices) {
+    this.backend = backend;
     this.maxVoices = maxVoices;
-    this.panningModel = panningModel;
     this.lanes = [];
     this.maxVoices = clamp(maxVoices, 4, 24);
   }
   createSynth(kind) {
     switch (kind) {
       case "fm":
-        return new Tone3.FMSynth({ harmonicity: 3, modulationIndex: 8, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1.4 }, modulationEnvelope: { attack: 0.01, decay: 0.4, sustain: 0.2, release: 1 } });
+        return new Tone7.FMSynth({ harmonicity: 3, modulationIndex: 8, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1.4 }, modulationEnvelope: { attack: 0.01, decay: 0.4, sustain: 0.2, release: 1 } });
       case "pluck":
-        return new Tone3.PluckSynth({ attackNoise: 1, dampening: 3e3, resonance: 0.92 });
+        return new Tone7.PluckSynth({ attackNoise: 1, dampening: 3e3, resonance: 0.92 });
       case "membrane":
-        return new Tone3.MembraneSynth({ pitchDecay: 0.04, octaves: 5, envelope: { attack: 1e-3, decay: 0.35, sustain: 0.01, release: 0.6 } });
+        return new Tone7.MembraneSynth({ pitchDecay: 0.04, octaves: 5, envelope: { attack: 1e-3, decay: 0.35, sustain: 0.01, release: 0.6 } });
       case "noise":
-        return new Tone3.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 1e-3, decay: 0.06, sustain: 0, release: 0.05 } });
+        return new Tone7.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 1e-3, decay: 0.06, sustain: 0, release: 0.05 } });
       default:
-        return new Tone3.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.25, release: 0.3 } });
+        return new Tone7.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.25, release: 0.3 } });
     }
   }
   createLane(kind) {
     const synth = this.createSynth(kind);
-    const filter = new Tone3.Filter({ frequency: 4e3, type: "lowpass", rolloff: -12, Q: 1 });
-    const panner = new Tone3.Panner3D({
-      panningModel: this.panningModel,
-      distanceModel: "inverse",
-      refDistance: 1,
-      rolloffFactor: 0.4,
-      positionX: 0,
-      positionY: 0,
-      positionZ: -2
-    });
-    const dry = new Tone3.Gain(1);
-    const send = new Tone3.Gain(0.18);
+    const filter = new Tone7.Filter({ frequency: 4e3, type: "lowpass", rolloff: -12, Q: 1 });
+    const out = this.backend.createOutput();
     synth.connect(filter);
-    filter.connect(panner);
-    panner.connect(dry);
-    panner.connect(send);
-    dry.connect(this.buses.dryIn);
-    send.connect(this.buses.wetIn);
-    const lane = { kind, synth, filter, panner, dry, send, busyUntil: 0 };
+    filter.connect(out.input);
+    const lane = { kind, synth, filter, out, busyUntil: 0 };
     this.lanes.push(lane);
     return lane;
   }
   acquire(kind) {
-    const now3 = Tone3.now();
+    const now5 = Tone7.now();
     let candidate = null;
     let oldestSameKind = null;
     let oldestAny = null;
     for (const lane of this.lanes) {
       if (lane.kind === kind) {
-        if (lane.busyUntil <= now3) {
+        if (lane.busyUntil <= now5) {
           candidate = lane;
           break;
         }
@@ -788,15 +1298,12 @@ var VoicePool = class {
   trigger(profile, velocity, when) {
     const raw = velocity * profile.velocityScale;
     if (raw <= 0.01) return;
-    const t = when ?? Tone3.now();
+    const t = when ?? Tone7.now();
     const vel = clamp(raw, 0.03, 1);
     const lane = this.acquire(profile.synthKind);
     lane.filter.frequency.rampTo(Math.max(200, profile.filterHz), 0.02, t);
     lane.filter.Q.rampTo(profile.filterQ, 0.02, t);
-    lane.panner.positionX.rampTo(profile.pan.x, 0.02, t);
-    lane.panner.positionY.rampTo(profile.pan.y, 0.02, t);
-    lane.panner.positionZ.rampTo(profile.pan.z, 0.02, t);
-    lane.send.gain.rampTo(clamp(profile.reverbSend, 0, 1), 0.02, t);
+    lane.out.setPlacement(profile, t);
     const dur = profile.durationS;
     try {
       switch (lane.kind) {
@@ -838,16 +1345,14 @@ var VoicePool = class {
     }
   }
   get activeCount() {
-    const now3 = Tone3.now();
-    return this.lanes.filter((l) => l.busyUntil > now3).length;
+    const now5 = Tone7.now();
+    return this.lanes.filter((l) => l.busyUntil > now5).length;
   }
   dispose() {
     for (const lane of this.lanes) {
       lane.synth.dispose();
       lane.filter.dispose();
-      lane.panner.dispose();
-      lane.dry.dispose();
-      lane.send.dispose();
+      lane.out.dispose();
     }
     this.lanes = [];
   }
@@ -866,9 +1371,9 @@ function attachPointer(engine) {
     if (!el) return;
     const profile = engine.scanner.profileFor(el);
     if (!profile || !PREVIEW_ROLES.has(profile.role)) return;
-    const now3 = performance.now();
-    if (now3 - (lastHover.get(el) ?? -Infinity) < HOVER_THROTTLE_MS) return;
-    lastHover.set(el, now3);
+    const now5 = performance.now();
+    if (now5 - (lastHover.get(el) ?? -Infinity) < HOVER_THROTTLE_MS) return;
+    lastHover.set(el, now5);
     engine.excite(el, 0.25, "preview");
   };
   window.addEventListener("pointermove", onMove, { passive: true });
@@ -886,9 +1391,9 @@ function attachActivate(engine) {
   const activate = (target) => {
     const el = engine.scanner?.resolve(target);
     if (!el) return;
-    const now3 = performance.now();
-    if (now3 - (lastHit.get(el) ?? -Infinity) < DEDUPE_MS) return;
-    lastHit.set(el, now3);
+    const now5 = performance.now();
+    if (now5 - (lastHit.get(el) ?? -Infinity) < DEDUPE_MS) return;
+    lastHit.set(el, now5);
     const profile = engine.scanner.profileFor(el);
     if (!profile) return;
     if (profile.role === "toggle") return;
@@ -935,9 +1440,9 @@ function attachKeyboard(engine) {
     const t = e.target;
     const editable = t instanceof HTMLElement && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable);
     if (!editable) return;
-    const now3 = performance.now();
-    if (now3 - lastTick < TICK_THROTTLE_MS) return;
-    lastTick = now3;
+    const now5 = performance.now();
+    if (now5 - lastTick < TICK_THROTTLE_MS) return;
+    lastTick = now5;
     const len = t.value?.length ?? t.textContent?.length ?? 0;
     const interval = FILL_INTERVALS[Math.min(FILL_INTERVALS.length - 1, Math.floor(len / 4))];
     engine.excite(t, 0.15, "tick", void 0, interval);
@@ -994,9 +1499,9 @@ function attachMotion(engine) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null || a.y == null || a.z == null) return;
     const magnitude = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.81);
-    const now3 = performance.now();
-    if (magnitude > SHAKE_THRESHOLD && now3 - lastShake > SHAKE_REFRACTORY_MS) {
-      lastShake = now3;
+    const now5 = performance.now();
+    if (magnitude > SHAKE_THRESHOLD && now5 - lastShake > SHAKE_REFRACTORY_MS) {
+      lastShake = now5;
       engine.strum(engine.scanner.visibleElements(), 0.5);
     }
   };
@@ -1030,6 +1535,7 @@ var Engine = class {
     this.pool = null;
     this.room = null;
     this.rig = null;
+    this.backend = null;
     this.gate = null;
     this.detachers = [];
     this.listeners = /* @__PURE__ */ new Map();
@@ -1053,9 +1559,11 @@ var Engine = class {
       volume: userOpts.volume ?? -10,
       maxVoices: clamp(userOpts.maxVoices ?? 18, 4, 24),
       panning: userOpts.panning === "equalpower" ? "equalpower" : "HRTF",
+      spatial: userOpts.spatial === "panner" ? "panner" : "ambisonic",
       reverb: userOpts.reverb ?? "auto",
       velocityFactor: reduced ? 0.7 : 1
     };
+    this.factors = resolveFactors(userOpts.perceptual);
     this.env = {
       root: this.opts.root,
       key: this.opts.key,
@@ -1095,21 +1603,18 @@ var Engine = class {
     if (this.state === "running" || this.state === "disposed" || this.starting) return;
     this.starting = true;
     try {
-      await Promise.race([Tone4.start(), new Promise((r) => setTimeout(r, 1500))]);
+      await Promise.race([Tone8.start(), new Promise((r) => setTimeout(r, 1500))]);
     } catch (err) {
       console.warn("[sonarium] audio context could not start yet", err);
     } finally {
       this.starting = false;
     }
-    if (Tone4.getContext().state !== "running" || this.state === "disposed") return;
+    if (Tone8.getContext().state !== "running" || this.state === "disposed") return;
     this.state = "running";
     this.removeUnlockListeners();
     this.gate?.setState(this.muted ? "muted" : "on");
-    this.room = new Room({ volumeDb: this.opts.volume, reverb: this.opts.reverb, ambient: this.opts.ambient }, this.env.vw);
-    this.pool = new VoicePool(this.room.buses, this.opts.maxVoices, this.opts.panning);
-    this.rig = new ListenerRig(this.opts.listener);
-    this.rig.start();
-    if (this.muted) this.room.setMuted(true);
+    this.buildAudioGraph();
+    if (this.muted) this.room?.setMuted(true);
     this.detachers.push(
       attachPointer(this),
       attachActivate(this),
@@ -1123,9 +1628,41 @@ var Engine = class {
     this.bucketTimer = setInterval(() => {
       this.appearBucket = Math.min(6, this.appearBucket + 6);
     }, 1e3);
-    this.room.startAmbience(this.env.vw, this.opts.ambient, () => this.pickSparkle());
+    this.room?.startAmbience(this.env.vw, this.opts.ambient, () => this.pickSparkle());
     this.playIntroMotif();
     this.emit("start");
+  }
+  /**
+   * SPATIAL.md §6 — ambisonic field by default; if its construction throws on an exotic
+   * browser, fall back to the v0.1 per-voice panner world rather than staying silent.
+   */
+  buildAudioGraph() {
+    const roomOpts = { volumeDb: this.opts.volume, reverb: this.opts.reverb, ambient: this.opts.ambient };
+    if (this.opts.spatial === "ambisonic") {
+      try {
+        this.room = new Room({ ...roomOpts, mode: "ambisonic" }, this.env.vw, this.factors);
+        const decoderKind = this.opts.panning === "equalpower" ? "stereo" : "binaural";
+        this.backend = new AmbisonicBackend(this.room, decoderKind, this.env.vw, this.factors);
+        this.rig = new FieldRig(this.backend, this.opts.listener);
+        this.rig.start();
+        this.pool = new VoicePool(this.backend, this.opts.maxVoices);
+        return;
+      } catch (err) {
+        console.warn("[sonarium] ambisonic backend unavailable, falling back to panner", err);
+        this.room?.dispose();
+        this.room = null;
+      }
+    }
+    this.room = new Room({ ...roomOpts, mode: "panner" }, this.env.vw, this.factors);
+    this.backend = new PannerBackend(this.room, this.opts.panning);
+    this.rig = new ListenerRig(this.opts.listener);
+    this.rig.start();
+    this.pool = new VoicePool(this.backend, this.opts.maxVoices);
+  }
+  /** Live spat5.oper surface: adjust presence/roomPresence/envelopment/warmth/brilliance. */
+  setPerceptual(partial) {
+    this.factors = resolveFactors({ ...this.factors, ...partial });
+    this.backend?.setFactors(this.factors);
   }
   toggleMute() {
     if (this.state !== "running") {
@@ -1154,6 +1691,7 @@ var Engine = class {
     this.scanner?.dispose();
     this.rig?.dispose();
     this.pool?.dispose();
+    this.backend?.dispose();
     this.room?.dispose();
     this.gate?.dispose();
     this.emit("dispose");
@@ -1182,7 +1720,7 @@ var Engine = class {
       const base = { ...profile, durationS: 0.12 };
       this.pool.trigger(base, velocity * this.opts.velocityFactor, when);
       const second = { ...profile, midi: profile.midi + dir * 7, freqHz: profile.freqHz * Math.pow(2, dir * 7 / 12), durationS: 0.16 };
-      this.pool.trigger(second, velocity * this.opts.velocityFactor, (when ?? Tone4.now()) + 0.09);
+      this.pool.trigger(second, velocity * this.opts.velocityFactor, (when ?? Tone8.now()) + 0.09);
     } else {
       this.pool.trigger(profile, velocity * this.opts.velocityFactor, when);
     }
@@ -1192,7 +1730,7 @@ var Engine = class {
   strum(els, velocity, articulation = "strum") {
     if (this.state !== "running" || !this.pool) return;
     const sorted = els.map((el) => ({ el, p: this.scanner.profileFor(el) })).filter((x) => !!x.p).sort((a, b) => a.p.rect.x - b.p.rect.x).slice(0, 6);
-    const t0 = Tone4.now();
+    const t0 = Tone8.now();
     sorted.forEach(({ el }, i) => this.excite(el, velocity, articulation, t0 + i * 0.06));
   }
   whisper(el) {
@@ -1216,7 +1754,7 @@ var Engine = class {
     });
     const byArea = candidates.map((el) => ({ el, area: el.getBoundingClientRect().width * el.getBoundingClientRect().height })).sort((a, b) => b.area - a.area).slice(0, 5).map((x) => x.el);
     const inDomOrder = candidates.filter((el) => byArea.includes(el));
-    const t0 = Tone4.now() + 0.1;
+    const t0 = Tone8.now() + 0.1;
     inDomOrder.forEach((el, i) => this.excite(el, 0.3, "motif", t0 + i * 0.09));
   }
   // ---------------------------------------------------------------- introspection
@@ -1233,6 +1771,7 @@ var Engine = class {
   roomResized() {
     this.geometryChanged();
     this.room?.resize(this.env.vw);
+    this.backend?.onViewport(this.env.vw);
   }
   // ---------------------------------------------------------------- events
   on(event, fn) {
@@ -1252,7 +1791,7 @@ var Engine = class {
 };
 
 // src/index.ts
-var version = "0.1.0";
+var version = "0.2.0";
 function create(options = {}) {
   return new Engine(options);
 }
@@ -1283,15 +1822,26 @@ function autoInit() {
 }
 autoInit();
 export {
+  CUBE_LAYOUT,
+  DEFAULT_FACTORS,
+  DEG,
   SCALES,
   THEMES,
+  applyMat3,
   create,
+  decodeGains,
+  decodeMatrix,
   degreeToMidi,
+  foaGains,
+  lookMatrix,
   mapping_exports as mapping,
   midiToFreq,
   midiToNoteName,
   parseKey,
+  rotationMatrix,
   siteKey,
+  sphere_exports as sphereMapping,
+  unitVector,
   version
 };
 //# sourceMappingURL=index.js.map

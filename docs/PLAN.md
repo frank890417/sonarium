@@ -190,7 +190,23 @@ motion), docs (this set), README (EN + 中文), MIT, repo public on GitHub, Page
 CI (build + test + deploy). **Acceptance:** demos run with zero console errors; `npm test` green;
 a stranger can hear the concept within 10 seconds of the landing page.
 
-### P1 — v0.2 "Chromatic" (next 1–2 sessions)
+### P1 — v0.2 "Spherical" *(user-directed priority change, 2026-06: shipped this session)*
+The IRCAM-Spat-inspired spatial engine — see [SPATIAL.md](./SPATIAL.md) for the full spec:
+- **Ambisonic field (AmbiX FOA)** replaces per-voice HRTF panners as the default backend:
+  sources encode into one W/Y/Z/X bus; binaural decode via 8 fixed virtual speakers through
+  native HRTF (constant cost, no assets); `spatial: 'panner'` keeps the v0.1 path as fallback.
+- **The sound sphere (聲球):** elements gain *extent* (big elements wrap around the listener)
+  and *directivity* (sharp beams, round radiates — Kiki/Bouba in the spatial domain).
+- **Field rotation as embodiment:** mouse-look on desktop, device attitude on mobile — one 3×3
+  matrix rotates the entire acoustic sphere (the ambisonic-native gesture).
+- **Spat perceptual factors:** presence, roomPresence, envelopment, warmth, brilliance — the
+  spat5.oper surface, as engine options with documented monotonic formulas.
+- **Room in the field:** early reflections encoded at mirror directions + diffuse tail whose
+  extent = envelopment.
+- Path forward (specified in SPATIAL.md §7): HOA orders 2–3, worklet decode with measured
+  HRIRs, head tracking, AmbiX field export.
+
+### P2 — v0.3 "Chromatic" (next 1–2 sessions)
 - Color → brightness/warmth mapping (parse computed `background-color`/`color`, map luminance →
   filter cutoff, hue warmth → detune/chorus). Thesis: warm = energetic.
 - Typography mapping (font-size/weight → register/velocity; `font-family` serif/sans → ?
@@ -202,20 +218,20 @@ a stranger can hear the concept within 10 seconds of the landing page.
 - Listening-test page (`/lab`): the thesis mismatch experiment, online, collecting anonymous
   agreement scores for every mapping (data → MAPPING.md revisions).
 
-### P2 — v0.3 "Embodied"
+### P3 — v0.4 "Embodied"
 - Gesture grammar: flick/circle/shake-direction vocabulary on mobile; gamepad; Web MIDI in/out.
 - WebXR listener (page becomes a literal room in AR/VR); head-tracked HRTF where available.
 - Multi-user shared rooms (WebRTC data channels): hear other cursors as positioned voices —
   the thesis V7 multiplayer thread.
 - React/Vue/Svelte bindings (`<Sonarium>` provider; hooks for custom triggers).
 
-### P3 — v0.4 "Ecosystem"
+### P4 — v0.5 "Ecosystem"
 - Theme editor (visual mapper: drag curves between CSS properties and synth params — the thesis
   patcher, reborn); theme share/remix registry (JSON packs + gallery).
 - Site-author API for narrative scoring (sections as movements, scroll as timeline).
 - Performance: AudioWorklet ambience, shared HRTF panner pool benchmark.
 
-### P4 — v1.0 "Standard"
+### P5 — v1.0 "Standard"
 - Stability guarantees, full a11y audit with screen-reader users, i18n docs,
   spec write-up proposing `--sonic-*` conventions as a community standard, academic paper
   (CHI/NIME/ICAD) reporting RQ1–RQ5 results.
@@ -267,6 +283,9 @@ mismatch tests), now instrumented on the web at scale:
 4. **L0 never imports DOM types; L1 never imports Tone.** The layer boundary is the product.
 5. **One script tag must always work.** Whatever else ships, the IIFE auto-init path stays.
 6. **`describe(el)` must always tell the truth** — explainability is a feature contract.
+7. **Spatial conventions are AmbiX (ACN/SN3D), +x forward, +y left, +z up, +azimuth left.**
+   Never mix conventions; sign decisions live in exactly one tested function each
+   (see [SPATIAL.md](./SPATIAL.md) §1, §3.1).
 
 ## 12. Handoff guide for future agents
 

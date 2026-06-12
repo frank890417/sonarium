@@ -14,15 +14,21 @@
 import { Engine } from './core/engine'
 import type { SonariumOptions } from './types'
 
-export const version = '0.1.0'
+export const version = '0.2.0'
 
 export type {
   SonariumOptions, SonicProfile, Theme, VoiceRecipe, Role, Wave, SynthKind,
-  Articulation, TriggerDetail, SonariumEvent,
+  Articulation, TriggerDetail, SonariumEvent, SphereProps, PerceptualFactors,
 } from './types'
 export { THEMES } from './themes/index'
 export { siteKey, parseKey, degreeToMidi, midiToFreq, midiToNoteName, SCALES } from './math/scales'
 export * as mapping from './math/mapping'
+// The pure spatial layer (SPATIAL.md) — reusable beyond the DOM.
+export { foaGains, unitVector, DEG } from './spatial/sh'
+export { rotationMatrix, lookMatrix, applyMat3 } from './spatial/rotation'
+export { CUBE_LAYOUT, decodeMatrix, decodeGains } from './spatial/decoder'
+export * as sphereMapping from './spatial/sphere'
+export { DEFAULT_FACTORS } from './spatial/perceptual'
 export type { Engine }
 
 /**

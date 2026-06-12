@@ -27,6 +27,10 @@ src/
 │   ├── keyboard.ts          focusin preview + typing ticks
 │   ├── scroll.ts            rect refresh on scroll/resize + room resize hook
 │   └── motion.ts            deviceorientation tilt + shake strum (iOS permission flow)
+├── spatial/                 v0.2 ambisonic engine — full spec in SPATIAL.md
+│   ├── sh.ts, rotation.ts, decoder.ts, sphere.ts, perceptual.ts   pure, tested, import nothing
+│   ├── encoder.ts, bus.ts, room-foa.ts                            Tone only
+│   └── (VoicePool reaches it through the SpatialBackend interface; 'panner' = v0.1 fallback)
 ├── themes/index.ts          L3: aurora / mono / paper as plain data (Theme objects)
 └── ui/gate.ts               unlock & mute chip (Shadow DOM, ARIA, localStorage)
 ```

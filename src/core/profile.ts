@@ -10,7 +10,10 @@ import {
 } from '../math/mapping'
 import { clamp } from '../math/util'
 import { degreeToMidi, midiToFreq, midiToNoteName, type SiteKey } from '../math/scales'
-import type { Rect, Role, SonicProfile, Theme, VoiceRecipe, Wave } from '../types'
+import { directivityFromRoundness, extentFromSize, sphereFromRect } from '../spatial/sphere'
+import { directivityFilterScale } from '../spatial/perceptual'
+import { DEG } from '../spatial/sh'
+import type { Rect, Role, SonicProfile, SphereProps, Theme, VoiceRecipe, Wave } from '../types'
 
 const HEADING = /^H[1-6]$/
 
@@ -140,9 +143,20 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
   const durationS = durationFromElongation(rect)
   reasons.duration = `aspect ${(Math.max(rect.w, rect.h) / Math.min(rect.w, rect.h)).toFixed(1)}:1 → ${durationS.toFixed(2)} s`
 
-  // Filter (S2 · G3, G9)
-  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh)
-  reasons.filter = `depth ${depth} + vertical position → low-pass ${Math.round(filterHz)} Hz`
+  // Sphere — the 聲球 (SPATIAL.md SP1–SP5)
+  const dir = sphereFromRect(rect, vw, vh)
+  const extentOverride = parseFloat(html.dataset?.sonicExtent ?? '')
+  const sphere: SphereProps = {
+    azimuth: dir.azimuth,
+    elevation: dir.elevation,
+    extent: isNaN(extentOverride) ? extentFromSize(st) : clamp(extentOverride, 0, 1),
+    directivity: directivityFromRoundness(round),
+  }
+  reasons.sphere = `az ${(sphere.azimuth / DEG).toFixed(0)}°, el ${(sphere.elevation / DEG).toFixed(0)}°, extent ${sphere.extent.toFixed(2)} (size wraps the listener), directivity ${sphere.directivity.toFixed(2)} (sharp beams, round radiates)`
+
+  // Filter (S2 · G3, G9) — directivity nudges brightness (SPATIAL.md §2)
+  const filterHz = cutoffFromDepth(depth) * brightnessTilt(rect, vh) * directivityFilterScale(sphere.directivity)
+  reasons.filter = `depth ${depth} + vertical position + directivity → low-pass ${Math.round(filterHz)} Hz`
 
   // Loudness (G5, G12, S3, quiet)
   let velocityScale = recipe.baseVelocity * velocityFromSize(st) * velocityFromDepth(depth) * (isNaN(opacity) ? 1 : opacity)
@@ -153,7 +167,7 @@ export function profileOf(el: Element, env: ProfileEnv): SonicProfile {
   const reverbSend = 0.18 + sendFromShadowBlur(shadowBlur)
 
   return {
-    role, rect, pan,
+    role, rect, pan, sphere,
     midi, freqHz: midiToFreq(midi), degree,
     wave, attack, release: 0.3 * recipe.releaseScale, durationS,
     filterHz, filterQ: qFromRoundness(round),

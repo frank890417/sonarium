@@ -16,8 +16,15 @@
 
 That's the whole integration. The page now *hears itself*:
 
-- **Layout becomes a stereo stage.** A button on the left *sounds* from the left — every element
-  is placed in a 3D sound field (HRTF) exactly where it sits on screen.
+- **The page becomes an ambisonic field.** Every element is encoded into one rotatable
+  full-sphere sound field (AmbiX FOA) around your head, IRCAM-Spat style — a button on the left
+  *sounds* from the left, decoded binaurally through virtual speakers. Moving the mouse doesn't
+  move a listener point: it **rotates the entire field**, like turning your head.
+  Spec: [docs/SPATIAL.md](./docs/SPATIAL.md) · live: [the Sound Sphere 聲球 demo](https://frank890417.github.io/sonarium/examples/sphere.html).
+- **Every element is a sound sphere (聲球).** Size sets its *extent* — big blocks wrap around
+  you, buttons are point sources; roundness sets its *directivity* — sharp elements beam at you,
+  round ones radiate (Kiki/Bouba extended into space). Five Spat-style perceptual factors
+  (presence, room presence, envelopment, warmth, brilliance) steer the whole scene.
 - **Geometry becomes timbre.** Corner radius morphs each element's voice from biting **square**
   through **sawtooth** and **triangle** to breathing **sine** — the
   [Kiki/Bouba effect](./docs/RESEARCH.md#2-cross-modal-correspondence-literature), made executable.
@@ -70,10 +77,14 @@ import { create } from 'sonarium'
 const space = create({
   theme: 'aurora',        // 'aurora' | 'mono' | 'paper' | custom Theme object
   key: 'auto',            // 'auto' = per-domain identity, or e.g. 'D dorian'
-  listener: 'pointer',    // your cursor is your ears ('center' to fix the head)
+  spatial: 'ambisonic',   // the FOA field (default) | 'panner' = v0.1 per-voice HRTF
+  listener: 'pointer',    // mouse-look rotates the field ('center' to fix it)
+  perceptual: { presence: 0.7, envelopment: 0.55 },  // the spat5.oper surface
   ambient: 0.12,          // room tone + sparkles, 0 to disable
   volume: -10,            // master dB
 })
+
+space.setPerceptual({ warmth: 0.8 })   // live perceptual control
 
 space.on('trigger', ({ el, profile }) => { /* drive visuals from sound */ })
 space.describe(document.querySelector('button'))  // → why does it sound like that?
@@ -126,7 +137,10 @@ Formulas, constants, and the research citation for every row:
 | `engine.excite(el, velocity, articulation)` | sound one element through its profile |
 | `engine.toggleMute()` / `engine.dispose()` | what they say |
 | `engine.on('start'\|'trigger'\|'mute'\|'dispose', fn)` | event hooks (demos draw ripples from `trigger`) |
+| `engine.setPerceptual({...})` | live Spat factors: presence, roomPresence, envelopment, warmth, brilliance |
+| `engine.rig.lookAt(yaw, pitch)` | rotate the field directly (head tracking / WebXR plug here) |
 | `siteKey(host)`, `parseKey('D dorian')`, `THEMES`, `mapping.*` | the pure layer, exported for reuse |
+| `foaGains`, `lookMatrix`, `decodeMatrix`, `sphereMapping.*` | the pure ambisonic layer (SPATIAL.md), reusable beyond the DOM |
 
 Options: `root, theme, key, listener, ambient, motion, gate ('chip'|'none'), volume, maxVoices,
 panning ('hrtf'|'equalpower'), reverb ('auto'|seconds), respectReducedMotion`.
@@ -143,24 +157,29 @@ a layer SR users can opt out of in one tap (a formal audit is on the roadmap).
 ## Project layout
 
 ```
-docs/        PLAN.md (vision/roadmap/handoff) · RESEARCH.md (theory) ·
-             MAPPING.md (the canon) · ARCHITECTURE.md (how the code implements it)
+docs/        PLAN.md (vision/roadmap/handoff) · RESEARCH.md (theory) · MAPPING.md (the canon) ·
+             SPATIAL.md (ambisonics & the sound sphere) · ARCHITECTURE.md (how code implements it)
 src/math/    pure mapping formulas + musical quantizer — no DOM, no Tone, fully tested
-src/core/    profile (element→sound identity), scanner, voice pool, room, listener, engine
+src/spatial/ the ambisonic engine: pure SH/rotation/decode math (tested) + FOA bus, encoders,
+             field rig, Spat room model, perceptual factors
+src/core/    profile (element→sound identity), scanner, voice pool, room, engine
 src/interact/ pointer, activate, keyboard, scroll, motion drivers
 src/themes/  sound palettes as plain data
-examples/    landing playground · one-line dashboard · depth · motion
+examples/    landing playground · sound sphere 聲球 · one-line dashboard · depth · motion
 ```
 
 Build `npm run build` · test `npm test` · demos `npm run serve` → `/examples/`.
 
 ## Roadmap
 
-**v0.2 "Chromatic"** — color→brightness mapping, `--sonic-*` CSS custom properties (a real aural
+**v0.2 "Spherical" — shipped**: the ambisonic field, the sound sphere, Spat perceptual factors
+([docs/SPATIAL.md](./docs/SPATIAL.md)); next there: HOA orders 2–3, worklet decode with measured
+HRIRs, head tracking, AmbiX field export.
+**v0.3 "Chromatic"** — color→brightness mapping, `--sonic-*` CSS custom properties (a real aural
 stylesheet), drag glissandi, adaptive ducking, npm publish, and `/lab`: an online replication of
 the thesis mismatch experiment to validate every mapping with real listeners.
-**v0.3 "Embodied"** — gesture grammar, Web MIDI, WebXR listener, multi-user rooms (hear other
-cursors). **v0.4 "Ecosystem"** — visual theme editor + shareable/remixable theme registry.
+**v0.4 "Embodied"** — gesture grammar, Web MIDI, WebXR listener, multi-user rooms (hear other
+cursors). **v0.5 "Ecosystem"** — visual theme editor + shareable/remixable theme registry.
 **v1.0 "Standard"** — stability, formal a11y audit, and a community spec for `--sonic-*`.
 Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
 
@@ -168,7 +187,14 @@ Details and research questions (RQ1–RQ5): [docs/PLAN.md](./docs/PLAN.md).
 
 **Sonarium 讓任何網頁加上一行 script，就變成一個立體聲學空間。**
 
-- **版面變成聲場**：元素在畫面上的位置，就是聲音在 3D 空間（HRTF）裡的位置 — 左邊的按鈕從左邊發聲。
+- **整個頁面是一個 Ambisonic 聲場**（v0.2）：所有元素編碼進同一個可旋轉的全球面聲場（AmbiX FOA），
+  以 IRCAM Spat 的架構管理 — 滑鼠移動不是移動「聽者的點」，而是**旋轉整個聲場**，就像轉頭一樣；
+  手機上則由裝置姿態驅動。規格書：[docs/SPATIAL.md](./docs/SPATIAL.md)，
+  現場展示：[聲球 demo](https://frank890417.github.io/sonarium/examples/sphere.html)。
+- **每個元素是一顆聲球**：尺寸決定它的「張角」（大區塊把你包進去、小按鈕是點音源）；
+  圓角決定指向性（尖銳的元素像光束射向你、圓潤的元素全向放射）。五個 Spat 知覺參數
+  （presence／room presence／envelopment／warmth／brilliance）即時控制整個場景。
+- **版面變成聲場**：元素在畫面上的位置，就是聲音在 3D 空間裡的位置 — 左邊的按鈕從左邊發聲。
 - **幾何變成音色**：圓角半徑讓波形從銳利的 square 一路滑到柔軟的 sine（Kiki/Bouba 效應的可執行版本）；
   越大的元素音高越低、越大聲；越長的元素音越長。
 - **DOM 樹變成和聲**：巢狀越深聲音越遠、越悶；同層兄弟元素爬同一個音階 — 導覽列是一句旋律，清單是一段琶音。

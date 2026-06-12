@@ -15,6 +15,8 @@ truth (vision, layer model, roadmap, and §11 Invariants, which are non-negotiab
 - `npm run serve` — Vite static server; demos at `/examples/`. Demos expose
   `window.__sonariumDebug` (`started`, `triggers[]`, `errors[]`) and `window.sonarium`/`space`
   for browser verification; `sonarium.describe(el)` works before audio unlock.
+  **Gotcha:** Vite's transform cache can keep serving a stale `dist/sonarium.iife.js` after a
+  rebuild — restart the dev server after `npm run build` before verifying in a browser.
 
 ## Hard rules (from PLAN.md §11 — change PLAN.md first if you must break one)
 

@@ -22,11 +22,33 @@ export interface Rect {
   h: number
 }
 
+/** Spherical source properties — the 聲球 (SPATIAL.md §2, §4). */
+export interface SphereProps {
+  /** Radians, AmbiX convention: +azimuth = left. */
+  azimuth: number
+  /** Radians, + = up. */
+  elevation: number
+  /** Apparent angular size σ ∈ [0,1] — point source … wraps around the listener. */
+  extent: number
+  /** δ ∈ [0,1]: 1 = focused beam at the listener, 0 = omni radiator. */
+  directivity: number
+}
+
+/** The spat5.oper surface (SPATIAL.md §5) — all ∈ [0,1], perceptually monotonic. */
+export interface PerceptualFactors {
+  presence: number
+  roomPresence: number
+  envelopment: number
+  warmth: number
+  brilliance: number
+}
+
 /** The contract between page reading (L1) and the audio substrate (L0). See ARCHITECTURE.md §2. */
 export interface SonicProfile {
   role: Role
   rect: Rect
   pan: { x: number; y: number; z: number }
+  sphere: SphereProps
   midi: number
   freqHz: number
   degree: number
@@ -80,6 +102,13 @@ export interface SonariumOptions {
   maxVoices?: number
   /** 'hrtf' (default) or 'equalpower' for low-end devices. */
   panning?: 'hrtf' | 'equalpower'
+  /**
+   * Spatial engine (SPATIAL.md): 'ambisonic' (default) encodes everything into one rotatable
+   * FOA field, Spat-style; 'panner' is the v0.1 per-voice HRTF path (also the auto-fallback).
+   */
+  spatial?: 'ambisonic' | 'panner'
+  /** Spat-style perceptual factors (presence, roomPresence, envelopment, warmth, brilliance). */
+  perceptual?: Partial<PerceptualFactors>
   /** Reverb: 'auto' sizes the room from viewport width, or a fixed decay in seconds. */
   reverb?: 'auto' | number
   /** Respect prefers-reduced-motion by softening output. Default true. */

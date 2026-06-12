@@ -77,6 +77,11 @@ Sonarium's mappings sit on well-replicated psychology, not taste:
 - **Game audio middleware (Wwise, FMOD)** — the "objects in a room + listener + buses" model is
   standard in games; Sonarium ports the model to the DOM, where the scene graph is the DOM tree
   and the camera is the cursor/viewport.
+- **Ambisonics & IRCAM Spat (v0.2)** — Gerzon's periphony, Daniel's HOA theory, the AmbiX
+  convention, Jot's Spat architecture and Jullien's perceptual factors (presence, warmth,
+  envelopment…) ground the v0.2 spatial engine; full treatment and citations in
+  [SPATIAL.md](./SPATIAL.md). Browser prior art (Google Omnitone, Resonance Audio) renders
+  ambisonics but does not *derive the scene from the page* — that remains Sonarium's territory.
 - **Modern web toys** — Patatap (Jono Brandel & Lullatone) and Typatone proved that keystroke-level
   audiovisual mapping delights mainstream users; Blokdust and Scratch (both discussed in the
   thesis) prove shareable browser instruments build communities. None of them *read an existing

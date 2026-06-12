@@ -1,11 +1,13 @@
 /**
  * L0 Acoustic Substrate — VoicePool (ARCHITECTURE.md §4).
- * Profiles are data; voices are rented lanes configured at trigger time. Imports Tone only;
- * never reads the DOM.
+ * Profiles are data; voices are rented lanes configured at trigger time. Spatial placement is
+ * delegated to the active SpatialBackend (ambisonic field or per-voice panners — SPATIAL.md §6).
+ * Imports Tone only; never reads the DOM.
  */
 import * as Tone from 'tone'
 import { clamp } from '../math/util'
 import type { SonicProfile, SynthKind } from '../types'
+import type { LaneOutput, SpatialBackend } from '../spatial/backend'
 
 type AnySynth = Tone.Synth | Tone.FMSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.NoiseSynth
 
@@ -13,9 +15,7 @@ interface Lane {
   kind: SynthKind
   synth: AnySynth
   filter: Tone.Filter
-  panner: Tone.Panner3D
-  dry: Tone.Gain
-  send: Tone.Gain
+  out: LaneOutput
   busyUntil: number
 }
 
@@ -28,9 +28,8 @@ export class VoicePool {
   private lanes: Lane[] = []
 
   constructor(
-    private buses: VoiceBuses,
+    private backend: SpatialBackend,
     private maxVoices: number,
-    private panningModel: 'HRTF' | 'equalpower',
   ) {
     this.maxVoices = clamp(maxVoices, 4, 24)
   }
@@ -53,22 +52,10 @@ export class VoicePool {
   private createLane(kind: SynthKind): Lane {
     const synth = this.createSynth(kind)
     const filter = new Tone.Filter({ frequency: 4000, type: 'lowpass', rolloff: -12, Q: 1 })
-    const panner = new Tone.Panner3D({
-      panningModel: this.panningModel,
-      distanceModel: 'inverse',
-      refDistance: 1,
-      rolloffFactor: 0.4,
-      positionX: 0, positionY: 0, positionZ: -2,
-    })
-    const dry = new Tone.Gain(1)
-    const send = new Tone.Gain(0.18)
+    const out = this.backend.createOutput()
     synth.connect(filter)
-    filter.connect(panner)
-    panner.connect(dry)
-    panner.connect(send)
-    dry.connect(this.buses.dryIn)
-    send.connect(this.buses.wetIn)
-    const lane: Lane = { kind, synth, filter, panner, dry, send, busyUntil: 0 }
+    filter.connect(out.input)
+    const lane: Lane = { kind, synth, filter, out, busyUntil: 0 }
     this.lanes.push(lane)
     return lane
   }
@@ -107,10 +94,7 @@ export class VoicePool {
 
     lane.filter.frequency.rampTo(Math.max(200, profile.filterHz), 0.02, t)
     lane.filter.Q.rampTo(profile.filterQ, 0.02, t)
-    lane.panner.positionX.rampTo(profile.pan.x, 0.02, t)
-    lane.panner.positionY.rampTo(profile.pan.y, 0.02, t)
-    lane.panner.positionZ.rampTo(profile.pan.z, 0.02, t)
-    lane.send.gain.rampTo(clamp(profile.reverbSend, 0, 1), 0.02, t)
+    lane.out.setPlacement(profile, t)
 
     const dur = profile.durationS
     try {
@@ -161,9 +145,7 @@ export class VoicePool {
     for (const lane of this.lanes) {
       lane.synth.dispose()
       lane.filter.dispose()
-      lane.panner.dispose()
-      lane.dry.dispose()
-      lane.send.dispose()
+      lane.out.dispose()
     }
     this.lanes = []
   }

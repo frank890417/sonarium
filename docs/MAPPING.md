@@ -102,6 +102,13 @@ the recipe (G7–G11 override oscillator/envelope where the recipe allows).
 - P1 (specified, not yet implemented): CSS custom properties `--sonic`, `--sonic-note`,
   `--sonic-wave` read via `getComputedStyle` — the de-facto aural stylesheet.
 
+## 5.5 Sphere mappings (v0.2)
+
+The ambisonic engine adds spherical source properties — azimuth/elevation from screen position,
+**extent from size** (SP4: big elements wrap around the listener), **directivity from roundness**
+(SP5: kiki beams, bouba radiates). Those rows live in [SPATIAL.md](./SPATIAL.md) §4 with the same
+canon status as this file.
+
 ## 6. Master bus & safety rails
 
 ```

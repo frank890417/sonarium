@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Sound Sphere 聲球 · Sonarium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#07080f; --ink:#e9ebf7; --mut:#9aa3bf; --line:rgba(255,255,255,.12); --accent:#1de3c0;
+    --square:#ff5470; --saw:#ffb347; --tri:#7cd4fd; --sine:#9d8cff;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Space Grotesk", system-ui, sans-serif; padding: 24px clamp(14px, 4vw, 56px) 90px; }
+  body::before {
+    content: ""; position: fixed; inset: -20%; z-index: -1; pointer-events: none;
+    background: radial-gradient(45% 55% at 80% 10%, rgba(112,72,232,.16), transparent 70%),
+                radial-gradient(40% 50% at 10% 90%, rgba(29,227,192,.1), transparent 70%);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: clamp(28px, 5vw, 44px); margin: 10px 0 4px; }
+  h1 .zh { color: var(--mut); font-size: .55em; vertical-align: middle; margin-left: 10px; }
+  p.lead { color: var(--mut); max-width: 720px; margin-bottom: 18px; }
+  .hint { color: var(--accent); font-size: 13.5px; margin-bottom: 18px; }
+
+  .stage { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 22px; align-items: start; }
+  @media (max-width: 920px) { .stage { grid-template-columns: 1fr; } }
+
+  #viz-wrap { position: relative; border: 1px solid var(--line); border-radius: 20px; overflow: hidden;
+    background: radial-gradient(60% 60% at 50% 45%, rgba(124,212,253,.06), transparent 75%); }
+  canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+  #viz-hud { position: absolute; left: 14px; top: 12px; font: 12px ui-monospace, Menlo, monospace; color: var(--mut); }
+  #viz-hud b { color: var(--accent); }
+
+  .panel { border: 1px solid var(--line); border-radius: 16px; padding: 18px; background: rgba(255,255,255,.04); }
+  .panel h2 { font-size: 15px; letter-spacing: .04em; margin-bottom: 4px; }
+  .panel p.s { color: var(--mut); font-size: 12.5px; margin-bottom: 14px; }
+  .panel label { display: block; font-size: 13px; color: var(--mut); margin: 12px 0 2px; }
+  .panel label span { float: right; color: var(--ink); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .panel input[type=range] { width: 100%; accent-color: var(--accent); }
+  .mode { display: flex; gap: 8px; margin-top: 16px; }
+  .mode button {
+    flex: 1; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; padding: 8px 0;
+    border: 1px solid var(--line); border-radius: 999px; background: transparent;
+  }
+  .mode button.active { background: rgba(29,227,192,.18); border-color: var(--accent); }
+
+  .orchestra { margin-top: 26px; }
+  .orchestra h2 { font-size: 18px; color: var(--mut); font-weight: 500; margin-bottom: 14px; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .row button {
+    font: inherit; color: var(--ink); cursor: pointer; border: 1px solid var(--line);
+    background: radial-gradient(circle at 30% 30%, rgba(124,212,253,.35), rgba(157,140,255,.1));
+  }
+  footer { margin-top: 40px; color: var(--mut); font-size: 13.5px; }
+</style>
+</head>
+<body>
+
+<a href="./index.html">← Sonarium</a>
+<h1>The Sound Sphere<span class="zh">聲球</span></h1>
+<p class="lead">Every element on this page is encoded into one <b>ambisonic field</b> (AmbiX FOA) that surrounds you — IRCAM-Spat style. Big elements become wide spheres that wrap around your head; sharp elements beam at you. Moving the mouse doesn't move a "listener point": it <b>rotates the entire field</b>, exactly like turning your head.</p>
+<p class="hint">🎧 headphones on · move the mouse slowly left–right · click the shapes · watch the sphere turn</p>
+
+<div class="stage">
+  <div id="viz-wrap" data-sonic="off">
+    <canvas id="viz" width="900" height="640" aria-label="live visualization of the ambisonic sound sphere"></canvas>
+    <div id="viz-hud">field yaw <b id="hud-yaw">0°</b> · pitch <b id="hud-pitch">0°</b> · backend <b id="hud-backend">—</b> · sources <b id="hud-n">0</b></div>
+  </div>
+
+  <div class="panel" data-sonic="off">
+    <h2>PERCEPTUAL OPERATOR</h2>
+    <p class="s">the spat5.oper surface — five factors, live</p>
+    <label>presence <span id="v-presence">0.70</span><input type="range" id="f-presence" min="0" max="100" value="70"></label>
+    <label>room presence <span id="v-roomPresence">0.50</span><input type="range" id="f-roomPresence" min="0" max="100" value="50"></label>
+    <label>envelopment <span id="v-envelopment">0.55</span><input type="range" id="f-envelopment" min="0" max="100" value="55"></label>
+    <label>warmth <span id="v-warmth">0.50</span><input type="range" id="f-warmth" min="0" max="100" value="50"></label>
+    <label>brilliance <span id="v-brilliance">0.50</span><input type="range" id="f-brilliance" min="0" max="100" value="50"></label>
+    <div class="mode">
+      <button id="mode-ambi" class="active">ambisonic field</button>
+      <button id="mode-panner">v0.1 panners</button>
+    </div>
+  </div>
+</div>
+
+<div class="orchestra">
+  <h2>sources — geometry decides each one's sphere</h2>
+  <div class="row">
+    <button style="width:54px;height:54px;border-radius:0" aria-label="small sharp">▪</button>
+    <button style="width:84px;height:84px;border-radius:14px" aria-label="medium">◆</button>
+    <button style="width:120px;height:120px;border-radius:50%" aria-label="large round">●</button>
+    <button style="width:230px;height:60px;border-radius:999px" aria-label="wide pill">— long pill —</button>
+    <button style="width:64px;height:64px;border-radius:8px" aria-label="medium sharp">▫</button>
+  </div>
+  <div class="row">
+    <button style="width:300px;height:90px;border-radius:24px" aria-label="hero block">a big block = a wide 聲球 that wraps around you</button>
+    <button style="width:44px;height:44px;border-radius:50%" aria-label="tiny dot">·</button>
+    <button style="width:160px;height:50px;border-radius:4px" aria-label="bar">sharp bar</button>
+  </div>
+</div>
+
+<footer>
+  Spec: <a href="https://github.com/frank890417/sonarium/blob/main/docs/SPATIAL.md">docs/SPATIAL.md</a> —
+  AmbiX (ACN/SN3D) encode → 3×3 field rotation → 8 virtual speakers → native HRTF.
+  Conventions and look-semantics are pinned by unit tests.
+</footer>
+
+<script src="../dist/sonarium.iife.js"></script>
+<script>
+  const debug = (window.__sonariumDebug = { started: false, triggers: [], errors: [] });
+  window.addEventListener('error', (e) => debug.errors.push(String(e.message)));
+
+  const WAVE_COLOR = { square: '#ff5470', sawtooth: '#ffb347', triangle: '#7cd4fd', sine: '#9d8cff' };
+  const pulses = new Map(); // element → pulse time
+
+  let space;
+  function boot(spatial) {
+    if (space) space.dispose();
+    space = Sonarium.create({ spatial, ambient: 0.1, perceptual: readFactors() });
+    window.space = space;
+    space.on('start', () => { debug.started = true; updateHud(); });
+    space.on('trigger', (d) => {
+      debug.triggers.push({ art: d.articulation, az: +(d.profile.sphere.azimuth / Sonarium.DEG).toFixed(0), extent: +d.profile.sphere.extent.toFixed(2) });
+      if (debug.triggers.length > 200) debug.triggers.shift();
+      pulses.set(d.el, performance.now());
+    });
+    return space;
+  }
+  function readFactors() {
+    const f = {};
+    for (const k of ['presence', 'roomPresence', 'envelopment', 'warmth', 'brilliance'])
+      f[k] = Number(document.getElementById('f-' + k).value) / 100;
+    return f;
+  }
+  boot('ambisonic');
+
+  // ------------------------------------------------------------- oper panel
+  for (const k of ['presence', 'roomPresence', 'envelopment', 'warmth', 'brilliance']) {
+    document.getElementById('f-' + k).addEventListener('input', () => {
+      const f = readFactors();
+      document.getElementById('v-' + k).textContent = f[k].toFixed(2);
+      space.setPerceptual(f);
+    });
+  }
+  const modeAmbi = document.getElementById('mode-ambi');
+  const modePanner = document.getElementById('mode-panner');
+  function setMode(spatial) {
+    modeAmbi.classList.toggle('active', spatial === 'ambisonic');
+    modePanner.classList.toggle('active', spatial === 'panner');
+    boot(spatial).start();
+  }
+  modeAmbi.addEventListener('click', () => setMode('ambisonic'));
+  modePanner.addEventListener('click', () => setMode('panner'));
+
+  // ------------------------------------------------------------- the sphere
+  const canvas = document.getElementById('viz');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, CX = W / 2, CY = H / 2 + 10, R = Math.min(W, H) * 0.4;
+
+  // Orthographic view from just behind the head: screen-x = −y (AmbiX +y is left),
+  // screen-y = −z. Forward (+x) is "into" the screen; nearer-to-front drawn larger.
+  function project(v) {
+    return { sx: CX - v[1] * R, sy: CY - v[2] * R, depth: v[0] }; // depth ∈ [−1, 1], +1 = front
+  }
+  function rotated(az, el) {
+    const rig = space && space.rig && space.rig.state ? space.rig.state : { yaw: 0, pitch: 0 };
+    const m = Sonarium.lookMatrix(rig.yaw, rig.pitch);
+    return Sonarium.applyMat3(m, Sonarium.unitVector(az, el));
+  }
+
+  function drawGrid() {
+    ctx.strokeStyle = 'rgba(154,163,191,.18)';
+    ctx.lineWidth = 1;
+    for (let el = -60; el <= 60; el += 30) {           // latitude rings
+      ctx.beginPath();
+      for (let az = -180; az <= 180; az += 6) {
+        const p = project(rotated(az * Sonarium.DEG, el * Sonarium.DEG));
+        az === -180 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+      }
+      ctx.stroke();
+    }
+    for (let az = -180; az < 180; az += 30) {          // longitude arcs
+      ctx.beginPath();
+      for (let el = -90; el <= 90; el += 6) {
+        const p = project(rotated(az * Sonarium.DEG, el * Sonarium.DEG));
+        el === -90 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+      }
+      ctx.stroke();
+    }
+    // front marker (where your nose points)
+    const f = project(rotated(0, 0));
+    ctx.fillStyle = 'rgba(29,227,192,.9)';
+    ctx.beginPath(); ctx.arc(f.sx, f.sy, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(29,227,192,.6)';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('front', f.sx + 8, f.sy + 3);
+    // the listener
+    ctx.fillStyle = 'rgba(233,235,247,.9)';
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(154,163,191,.7)';
+    ctx.fillText('you', CX + 9, CY + 3);
+  }
+
+  function drawSources() {
+    if (!space || !space.scanner) return 0;
+    const els = space.scanner.visibleElements();
+    const dots = [];
+    for (const el of els) {
+      const p = space.describe(el);
+      if (!p || p.role === 'container') continue;
+      const v = rotated(p.sphere.azimuth, p.sphere.elevation);
+      const pr = project(v);
+      dots.push({ pr, p, el });
+    }
+    dots.sort((a, b) => a.pr.depth - b.pr.depth); // back first
+    const now = performance.now();
+    for (const { pr, p, el } of dots) {
+      const near = (pr.depth + 1) / 2;             // 0 back … 1 front
+      const base = (6 + p.sphere.extent * 34) * (0.55 + near * 0.45);
+      const pulse = pulses.has(el) ? Math.max(0, 1 - (now - pulses.get(el)) / 600) : 0;
+      const r = base * (1 + pulse * 0.5);
+      const color = WAVE_COLOR[p.wave] || '#fff';
+      ctx.globalAlpha = 0.25 + near * 0.55 + pulse * 0.2;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(pr.sx, pr.sy, r, 0, 7); ctx.fill();
+      ctx.globalAlpha = Math.min(1, 0.5 + near * 0.5);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = p.sphere.directivity > 0.6 ? 2 : 1; // sharp sources get hard rims
+      ctx.beginPath(); ctx.arc(pr.sx, pr.sy, r, 0, 7); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    return dots.length;
+  }
+
+  function updateHud() {
+    const rig = space && space.rig && space.rig.state ? space.rig.state : { yaw: 0, pitch: 0 };
+    document.getElementById('hud-yaw').textContent = (rig.yaw / Sonarium.DEG).toFixed(0) + '°';
+    document.getElementById('hud-pitch').textContent = (rig.pitch / Sonarium.DEG).toFixed(0) + '°';
+    document.getElementById('hud-backend').textContent = space && space.backend ? space.backend.kind : 'armed';
+    }
+
+  (function frame() {
+    ctx.clearRect(0, 0, W, H);
+    drawGrid();
+    const n = drawSources();
+    document.getElementById('hud-n').textContent = String(n);
+    updateHud();
+    requestAnimationFrame(frame);
+  })();
+</script>
+</body>
+</html>
