@@ -96,7 +96,7 @@ It grew out of the author's NYU master's thesis,
 **As a module:**
 
 ```bash
-npm install github:frank890417/sonarium   # npm publish coming in v0.2
+npm install sonarium
 ```
 
 ```js
